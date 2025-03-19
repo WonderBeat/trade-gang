@@ -1,0 +1,46 @@
+.{
+    // This is the default name used by packages depending on this one. For
+    // example, when a user runs `zig fetch --save <url>`, this field is used
+    // as the key in the `dependencies` table. Although the user can choose a
+    // different name, most users will stick with this provided value.
+    //
+    // It is redundant to include "zig" in this name because it is already
+    // within the Zig package namespace.
+    .name = "killer-whale",
+
+    // This is a [Semantic Version](https://semver.org/).
+    // In a future version of Zig it will be used for package deduplication.
+    .version = "1.0.0",
+
+    // This field is optional.
+    // This is currently advisory only; Zig does not yet do anything
+    // with this value.
+    .minimum_zig_version = "0.13.0",
+
+    // This field is optional.
+    // Each dependency must either provide a `url` and `hash`, or a `path`.
+    // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
+    // Once all dependencies are fetched, `zig build` no longer requires
+    // internet connectivity.
+    .dependencies = .{
+        // .ymlz = .{
+        //     .url = "https://github.com/pwbh/ymlz/archive/refs/tags/0.1.0.tar.gz",
+        //     .hash = "12201b13fc0f23c3c2670d0327800b8738e3ef590911025247db56baa9129aee134f",
+        // },
+        .curl = .{
+            .url = "https://github.com/jiacai2050/zig-curl/archive/273793dedacfce74b2173741dc942c3233f3eb8c.tar.gz",
+            .hash = "122040c97ad2559e70319f98d752d85ffc5936f49b836ee427fc6e05fd06d3171acf",
+        },
+        .nexlog = .{
+            .url = "https://github.com/chrischtel/nexlog/archive/v0.4.0.tar.gz",
+            .hash = "1220f8d7ea5474370db63dae56ba2a175f578818baf4873a7c24f1722ab6f5a4b540",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/main.zig",
+        "src",
+        //"README.md",
+    },
+}

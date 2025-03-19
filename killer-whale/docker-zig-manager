@@ -1,0 +1,63 @@
+#!/bin/sh
+
+set -eux -o pipefail
+
+TARGET_DIR=/usr/local/bin/zig
+
+usage() {
+  echo "Usage: $0 {fetch|extract}"
+  echo "  fetch ARCH ZIG_VERSION"
+  echo "  extract"
+}
+
+fetch() {
+  apk add --no-cache --virtual .fetch-deps curl
+  # tmp proxy
+  curl -s -o zig.tar.xz "$1" --proxy socks5://10.46.208.119:80
+  if [ "$2" != "no" ]; then
+    echo "$2 *zig.tar.xz" | sha256sum -c -
+  fi
+  apk del .fetch-deps
+}
+
+extract() {
+  apk add --no-cache --virtual .extract-deps tar xz
+  mkdir -p "$TARGET_DIR"
+  if [ ! -f "$TARGET_DIR/.extracted" ]; then
+    tar -Jxf /usr/src/zig.tar.xz -C "$TARGET_DIR" --strip-components=1
+    touch "$TARGET_DIR/.extracted"
+  fi
+  rm /usr/src/zig.tar.xz
+  apk del .extract-deps
+}
+
+case "$1" in
+fetch)
+  ARCH=$2
+  ZIG_VERSION=$3
+  case "$ARCH" in
+  x86_64 | linux/amd64)
+    ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
+    ZIG_SHA256="no"
+    ;;
+  aarch64 | armv7l | armv8l | linux/arm64)
+    ZIG_URL="https://ziglang.org/download/${ZIG_VERSION}/zig-linux-aarch64-${ZIG_VERSION}.tar.xz"
+    ZIG_SHA256="no"
+    ;;
+  *)
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+    ;;
+  esac
+  fetch "$ZIG_URL" "$ZIG_SHA256"
+  ;;
+
+extract)
+  extract
+  ;;
+
+*)
+  usage
+  exit 1
+  ;;
+esac
