@@ -1,0 +1,29 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=733558
+  // for the documentation about the tasks.json format
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Debugger",
+      "type": "shell",
+      "command": "bun run --watch --inspect-brk=localhost:3000/prefix --port 3000 index.ts",
+      "group": "test",
+      //      "presentation": {
+      //        "reveal": "always",
+      //        "panel": "new"
+      //      }
+    },
+    {
+      "label": "Compile binary",
+      "type": "shell",
+      "command": "bun build --compile --target=bun-darwin-arm64 ./index.ts --outfile app",
+      "group": "test"
+    },
+    {
+      "label": "Run",
+      "type": "shell",
+      "command": "bun run ./index.ts",
+      "group": "test"
+    }
+  ]
+}
