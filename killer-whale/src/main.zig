@@ -68,7 +68,8 @@ pub fn fingerprinted_get(allocator: std.mem.Allocator, client: *const curl.Easy,
     return Parsed(WatermarkedResponse){ .arena = arena, .value = WatermarkedResponse{ .id = id, .response = body } };
 }
 
-fn wait_for_update(allocator: std.mem.Allocator, comptime url_for_templating: [:0]const u8, seed: usize) !void {
+fn wait_for_announcement(allocator: std.mem.Allocator, seed: usize) !void {
+    const url_for_templating = "https://www.binance.{s}/en/support/{s}/list/{s}93";
     const ca_bundle = try curl.allocCABundle(allocator);
     defer ca_bundle.deinit();
     const easy = try curl.Easy.init(allocator, .{
@@ -170,7 +171,7 @@ pub fn main() !void {
         });
         break :brk std.rand.intRangeAtMost(prng.random(), usize, 0, 10000);
     };
-    try wait_for_update(allocator, "https://www.binance.{s}/en/support/{s}/list/{s}93", seed);
+    try wait_for_announcement(allocator, seed);
 }
 
 test {

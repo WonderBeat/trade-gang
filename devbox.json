@@ -2,7 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
   "packages": [
     "zig@0.13.0",
-    "odo@latest"
+    "odo@latest",
+    "bun@latest",
+    "k9s@latest"
   ],
   "shell": {
     "init_hook": [
