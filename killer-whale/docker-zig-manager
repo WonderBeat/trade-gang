@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 set -eux -o pipefail
 
@@ -11,24 +11,24 @@ usage() {
 }
 
 fetch() {
-  apk add --no-cache --virtual .fetch-deps curl
+  #apk add --no-cache --virtual .fetch-deps curl
   # tmp proxy
   curl -s -o zig.tar.xz "$1" --proxy socks5://10.46.208.119:80
   if [ "$2" != "no" ]; then
     echo "$2 *zig.tar.xz" | sha256sum -c -
   fi
-  apk del .fetch-deps
+  #apk del .fetch-deps
 }
 
 extract() {
-  apk add --no-cache --virtual .extract-deps tar xz
+  #apk add --no-cache --virtual .extract-deps tar xz
   mkdir -p "$TARGET_DIR"
   if [ ! -f "$TARGET_DIR/.extracted" ]; then
     tar -Jxf /usr/src/zig.tar.xz -C "$TARGET_DIR" --strip-components=1
     touch "$TARGET_DIR/.extracted"
   fi
   rm /usr/src/zig.tar.xz
-  apk del .extract-deps
+  #apk del .extract-deps
 }
 
 case "$1" in

@@ -1,13 +1,20 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
   "packages": [
-    "zig@0.13.0",
+    "zig@latest",
     "odo@latest",
     "bun@latest",
-    "k9s@latest"
+    "k9s@latest",
+    "curl@latest",
+    "uv@latest",
+    "protobuf@latest",
+    "docker-compose@latest"
   ],
   "shell": {
     "init_hook": [
+      "export LDFLAGS=\"-L/opt/homebrew/opt/curl/lib\"",
+      "export CPPFLAGS=\"-I/opt/homebrew/opt/curl/include\"",
+      "export NIX_LDFLAGS=\"$NIX_LDFLAGS $LDFLAGS\"",
       "echo 'Welcome to devbox!' > /dev/null"
     ],
     "scripts": {

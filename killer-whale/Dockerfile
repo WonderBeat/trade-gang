@@ -1,9 +1,12 @@
-FROM --platform=$BUILDPLATFORM alpine:3.21.3
+FROM --platform=$BUILDPLATFORM debian:bookworm
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ARG ZIG_VERSION=0.13.0
+ARG ZIG_VERSION=0.14.0
 WORKDIR /usr/src
+
+RUN apt-get update
+RUN apt-get install curl tar xz-utils -y
 
 COPY docker-zig-manager /usr/local/bin/docker-zig-manager
 RUN /usr/local/bin/docker-zig-manager fetch "$BUILDPLATFORM" $ZIG_VERSION
@@ -12,6 +15,9 @@ RUN /usr/local/bin/docker-zig-manager extract
 ENV PATH="/usr/local/bin/zig:${PATH}"
 
 WORKDIR /app
+
+RUN dpkg --add-architecture amd64 && dpkg --add-architecture arm64 && apt-get update 
+RUN apt-get install -y libcurl4-openssl-dev:amd64 libcurl4-openssl-dev:arm64
 
 ENTRYPOINT ["/usr/local/bin/zig/zig"]
 
@@ -25,6 +31,7 @@ COPY src ./src/
 RUN ./build.sh "$TARGETPLATFORM" "/application"
 
 FROM alpine:3.21.3
+RUN apk add curl-dev
 COPY --from=0 /application/bin/app /app
 
 CMD ["/app"]

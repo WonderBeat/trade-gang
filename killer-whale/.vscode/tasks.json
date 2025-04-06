@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "zig build",
+      "group": "test",
+      "presentation": {
+        //"reveal": "always"
+        //  "panel": "new"
+      }
+    },
+    {
+      "label": "RUN",
+      "type": "shell",
+      "command": "./zig-out/bin/app",
+      "group": "test",
+      "dependsOn": "Build",
+      "presentation": {
+        "reveal": "always"
+        //  "panel": "new"
+      }
+    },
+    {
+      "label": "Run REMOTE",
+      "type": "shell",
+      "command": "zig build -Dtarget=x86_64-linux && rsync -av ./zig-out/bin/app xpand:app && ssh xpand ./app",
+      "group": "test",
+      "presentation": {
+        "reveal": "always"
+        //  "panel": "new"
+      }
+    },
+    {
+      "label": "Run kesa",
+      "type": "shell",
+      "command": "zig build -Dtarget=arm-linux-musleabi && rsync -av ./zig-out/bin/test-arm-linux-musleabi kesaram:test && ssh kesaram ./test",
+      "group": "test",
+      "presentation": {
+        "reveal": "always"
+        //  "panel": "new"
+      }
+    },
+    {
+      "label": "Run Synology",
+      "type": "shell",
+      "command": "zig build -Dtarget=x86_64-linux && rsync -av ./zig-out/bin/test-x86_64-linux nasduck:/tmp && ssh nasduck /tmp/test-x86_64-linux",
+      "group": "test",
+      "presentation": {
+        "reveal": "always"
+        //  "panel": "new"
+      }
+    }
+  ]
+}

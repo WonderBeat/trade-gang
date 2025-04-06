@@ -1,18 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const protobuf = @import("protobuf");
 
 pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run unit tests");
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // const target_str = switch (target.query.cpu_arch.?) {
-    //     .arm, .armeb => "arm",
-    //     .x86 => "x86",
-    //     else => "",
-    // };
-
-    //const name = try std.fmt.allocPrint(b.allocator, "app-{s}", .{target_str});
     const exe = b.addExecutable(.{
         .name = "app",
         .root_source_file = b.path("src/main.zig"),
@@ -21,14 +15,52 @@ pub fn build(b: *std.Build) !void {
     });
     exe.addIncludePath(b.path("."));
 
-    const dep_curl = b.dependency("curl", .{ .target = target, .optimize = optimize });
-    exe.root_module.addImport("curl", dep_curl.module("curl"));
-    exe.linkLibC();
+    const protobuf_dep = b.dependency("protobuf", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
-    const dep_log = b.dependency("nexlog", .{ .target = target, .optimize = optimize });
-    exe.root_module.addImport("nexlog", dep_log.module("nexlog"));
+    exe.root_module.addImport("protobuf", protobuf_dep.module("protobuf"));
+
+    const dep_curl = b.dependency("curl", .{ .target = target, .optimize = optimize, .link_vendor = false });
+    dep_curl.builder.addSearchPrefix("/usr/include");
+
+    dep_curl.module("curl").addIncludePath(.{ .cwd_relative = "/usr/include" });
+    dep_curl.module("curl").addIncludePath(.{ .cwd_relative = "/opt/homebrew/opt/curl/include" });
+    dep_curl.module("curl").addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+
+    exe.root_module.addImport("curl", dep_curl.module("curl"));
+
+    exe.linkSystemLibrary("curl");
+    //exe.linkLibC();
+
+    //const dep_log = b.dependency("nexlog", .{ .target = target, .optimize = optimize });
+    //exe.root_module.addImport("nexlog", dep_log.module("nexlog"));
+    const dep_zeit = b.dependency("zeit", .{ .target = target, .optimize = optimize });
+    exe.root_module.addImport("zeit", dep_zeit.module("zeit"));
+
     // const ymlz = b.dependency("ymlz", .{});
     // exe.root_module.addImport("ymlz", ymlz.module("root"));
+
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/local/lib" });
+    exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+    switch (target.query.cpu_arch orelse .x86_64) {
+        .x86_64 => if (dir_exists("/usr/lib/x86_64-linux-gnu")) {
+            exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/x86_64-linux-gnu" });
+        },
+        .aarch64 => if (dir_exists("/usr/lib/aarch64-linux-gnu")) {
+            exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/aarch64-linux-gnu" });
+        },
+        else => {
+            return error.Undef;
+        },
+    }
+
+    exe.addIncludePath(.{ .cwd_relative = "/usr/include/" });
+
+    const yazap = b.dependency("yazap", .{});
+    exe.root_module.addImport("yazap", yazap.module("yazap"));
+
     b.installArtifact(exe);
 
     const unit_tests = b.addTest(.{
@@ -36,8 +68,29 @@ pub fn build(b: *std.Build) !void {
         .target = target,
     });
     unit_tests.root_module.addImport("curl", dep_curl.module("curl"));
-    unit_tests.root_module.addImport("zlog", dep_log.module("nexlog"));
+    unit_tests.root_module.addImport("zeit", dep_zeit.module("zeit"));
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     test_step.dependOn(&run_unit_tests.step);
+
+    const gen_proto = b.step("gen-proto", "generates zig files from protocol buffer definitions");
+
+    const protoc_step = protobuf.RunProtocStep.create(b, protobuf_dep.builder, target, .{
+        // out directory for the generated zig files
+        .destination_directory = b.path("src/proto"),
+        .source_files = &.{
+            "protocol/all.proto",
+        },
+        .include_directories = &.{},
+    });
+
+    gen_proto.dependOn(&protoc_step.step);
+}
+
+pub fn dir_exists(directory: []const u8) bool {
+    if (std.fs.cwd().statFile(directory)) |_| {
+        return true;
+    } else |_| {
+        return false;
+    }
 }
