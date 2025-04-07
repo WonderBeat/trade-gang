@@ -67,8 +67,9 @@ pub fn fingerprinted_get(allocator: std.mem.Allocator, client: *const curl.Easy,
 const available_page_sizes = [_]u32{ 50, 20, 15, 10, 5, 3, 2 };
 
 const template_url = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}";
+//const template_url = "http://127.0.0.1:8765/{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}";
 
-const ChangeWaitingParams = struct { catalog_id: []const u8, tld: []const u8, seed: usize };
+pub const ChangeWaitingParams = struct { catalog_id: []const u8, tld: []const u8, seed: usize };
 
 pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Easy, config: ChangeWaitingParams, latest_total: *u32) !?Parsed(WatermarkedResponse) {
     for (1..10) |page_index| {
@@ -97,7 +98,7 @@ pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Eas
         std.log.debug("ID {d} for {s} in {d}ms", .{ new_total, url, time_spent_query });
         if (new_total > latest_total.*) {
             if (latest_total.* != 0) {
-                std.log.info("Total updated {d},{d}, {s}", .{ latest_total.*, new_total, result.value.response });
+                std.log.debug("Total updated {d},{d}", .{ latest_total.*, new_total });
                 return result;
             }
             latest_total.* = result.value.id;
@@ -110,14 +111,14 @@ pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Eas
     return null;
 }
 
-pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Easy, catalog_id: []const u8, new_total: u32) !?Parsed(WatermarkedResponse) {
-    for (1..100) |punch| {
+pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Easy, catalog_id: []const u8, tld: []const u8, new_total: u32) !?Parsed(WatermarkedResponse) {
+    for (1..111) |punch| {
         loop: for (available_page_sizes) |size| {
             const zero_pad = try repeatZ(allocator, "0", punch);
             defer allocator.free(zero_pad);
             const tweaked_catalog_id = try std.fmt.allocPrint(allocator, "+{s}{s}", .{ zero_pad, catalog_id });
             defer allocator.free(tweaked_catalog_id);
-            const fetch_url = try std.fmt.allocPrint(allocator, template_url, .{ "com", 1, size, tweaked_catalog_id });
+            const fetch_url = try std.fmt.allocPrint(allocator, template_url, .{ tld, 1, size, tweaked_catalog_id });
             defer allocator.free(fetch_url);
             const response = fingerprinted_get(allocator, easy, fetch_url) catch |erz| {
                 std.log.debug("Punching {d}:{s}: {s}", .{ punch, fetch_url, @errorName(erz) });
@@ -200,14 +201,18 @@ pub fn extract_timestamp(body: []const u8) ?i128 {
         break :blk 0;
     };
 }
-
-pub fn repeatZ(allocator: std.mem.Allocator, pattern: []const u8, count: usize) ![:0]const u8 {
-    const result_len = pattern.len * count;
-    var result = try allocator.allocSentinel(u8, result_len, 0);
-    for (0..count) |i| {
-        std.mem.copyForwards(u8, result[i * pattern.len .. (i + 1) * pattern.len], pattern);
+pub fn exctact_id_and_tokens(body: []const u8) struct { id: u32, tokens: []const u8 } {
+    const needle = "\"id\":";
+    const start_index = std.mem.indexOf(u8, body, needle) orelse return .{ .id = 0, .tokens = "" };
+    const start = start_index + needle.len;
+    var end: usize = start;
+    while (end < body.len and std.ascii.isDigit(body[end])) {
+        end += 1;
     }
-    return result;
+    const id_slice = body[start..end];
+    const id = std.fmt.parseInt(u32, id_slice, 10) catch return .{ .id = 0, .tokens = "" };
+
+    return .{ .id = id, .tokens = "" };
 }
 
 pub fn isCacheHit(header: *const http.Header) bool {
@@ -294,11 +299,16 @@ pub fn timedRequest(client: *http.Client, buffer: []u8, headers: []const http.He
     return end - start;
 }
 
-test "test extract coins from response" {
-    //const response = "{"code":"000000","message":null,"messageDetail":null,"data":{"catalogs":[{"catalogId":93,"parentCatalogId":null,"icon":"https://public.bnbstatic.com/image/cms/content/body/202202/d8638bc5588e7988ff51e2a891b9b60c.png","catalogName":"Latest Activities","description":null,"catalogType":1,"total":2012,"articles":[{"id":180049,"code":"047b59975acd4ea8b4acf987a19a8915","title":"DOCK Flexible Products: Enjoy 6.4% Bonus Tiered APR and Earn Additional 800 DOCK!","type":1,"releaseDate":1697516114728},{"id":179978,"code":"4cedf8d548ba4c5bb25a103c2e9a1b6d","title""
+fn repeatZ(allocator: std.mem.Allocator, pattern: []const u8, count: usize) ![:0]u8 {
+    const len = pattern.len * count;
+    var result = try allocator.allocSentinel(u8, len, 0);
+    for (0..count) |i| {
+        @memcpy(result[i * pattern.len .. (i + 1) * pattern.len], pattern);
+    }
+    return result;
 }
 
-test "test repeat pattern" {
+test "repeat pattern" {
     const alloc = std.testing.allocator;
     const pattern = try repeatZ(alloc, "abc", 2);
     defer alloc.free(pattern);

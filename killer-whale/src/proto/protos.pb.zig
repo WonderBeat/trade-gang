@@ -12,12 +12,14 @@ const ManagedStruct = protobuf.ManagedStruct;
 pub const Announcement = struct {
     ts: u64 = 0,
     signature: ManagedString = .Empty,
+    is_delist: bool = false,
     tokens: ArrayList(ManagedString),
 
     pub const _desc_table = .{
         .ts = fd(1, .{ .Varint = .Simple }),
         .signature = fd(2, .Bytes),
-        .tokens = fd(3, .{ .List = .String }),
+        .is_delist = fd(3, .{ .Varint = .Simple }),
+        .tokens = fd(4, .{ .List = .String }),
     };
 
     pub usingnamespace protobuf.MessageMixins(@This());

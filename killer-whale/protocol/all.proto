@@ -4,5 +4,6 @@ package protos;
 message Announcement {
     uint64 ts = 1;
     bytes signature = 2;
-    repeated string tokens = 3;
+    bool is_delist = 3;
+    repeated string tokens = 4;
 }

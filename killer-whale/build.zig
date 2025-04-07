@@ -67,8 +67,11 @@ pub fn build(b: *std.Build) !void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
     });
+    unit_tests.root_module.addImport("yazap", yazap.module("yazap"));
     unit_tests.root_module.addImport("curl", dep_curl.module("curl"));
     unit_tests.root_module.addImport("zeit", dep_zeit.module("zeit"));
+    unit_tests.root_module.addImport("protobuf", protobuf_dep.module("protobuf"));
+    unit_tests.linkSystemLibrary("curl");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     test_step.dependOn(&run_unit_tests.step);

@@ -17,7 +17,7 @@ import os
 WEBSOCKET_SERVER_URI = os.environ.get("WEBSOCKET_SERVER_URI", "ws://localhost:8080")
 UDP_HOST = os.environ.get("UDP_HOST", "0.0.0.0")
 UDP_PORT = int(os.environ.get("UDP_PORT", 8081))
-TEST_MODE = int(os.environ.get("TEST_MODE", False))
+TEST_MODE = int(os.environ.get("TEST_MODE", True))
 
 
 class SetEncoder(json.JSONEncoder):
@@ -45,7 +45,7 @@ class NewAnnounces(BaseMessage):
     type: str = field(init=False, default="new_announces")
     client_id: str
     entries: List[PageEntry]
-    test: bool = False
+    dry_run: bool = False
 
 
 async def run_udp_server():
@@ -60,17 +60,21 @@ async def run_udp_server():
         message.ParseFromString(data)  # .decode("utf-8")
         json_forward_announce = NewAnnounces(
             "bombardino coccodrillo",
-            [PageEntry("No INFO", message.ts, list(message.tokens))],
-            test=TEST_MODE,
+            [PageEntry("empty", message.ts, list(message.tokens))],
+            dry_run=TEST_MODE,
         )
         logger.info(f"Received {json_forward_announce.to_json_str()} from {addr}")
+
+        if not message.is_delist:
+            logger.info("Not a delisting event")
+            continue
 
         try:
             async with websockets.connect(WEBSOCKET_SERVER_URI) as websocket:
                 await websocket.send(json_forward_announce)
                 logger.info(f"Sent to WebSocket server: {message}")
         except Exception as e:
-            logger.exception("Error sending to WebSocket server")
+            logger.error("Error sending to WebSocket server")
 
 
 async def main():
