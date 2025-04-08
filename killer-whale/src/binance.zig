@@ -2,6 +2,7 @@ const std = @import("std");
 const expect = std.testing.expect;
 const http = std.http;
 const ArenaAllocator = std.heap.ArenaAllocator;
+const builtin = @import("builtin");
 
 const curl = @import("curl");
 
@@ -66,10 +67,12 @@ pub fn fingerprinted_get(allocator: std.mem.Allocator, client: *const curl.Easy,
 
 const available_page_sizes = [_]u32{ 50, 20, 15, 10, 5, 3, 2 };
 
-const template_url = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}";
-//const template_url = "http://127.0.0.1:8765/{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}";
+const template_url = switch (builtin.mode) {
+    .Debug => "http://127.0.0.1:8765/{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}",
+    else => "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}",
+};
 
-pub const ChangeWaitingParams = struct { catalog_id: []const u8, tld: []const u8, seed: usize };
+pub const ChangeWaitingParams = struct { catalog_id: u16, tld: []const u8, seed: usize };
 
 pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Easy, config: ChangeWaitingParams, latest_total: *u32) !?Parsed(WatermarkedResponse) {
     for (1..10) |page_index| {
@@ -89,7 +92,9 @@ pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Eas
             else => 100,
         }; // hard limit
         const page_num = (seeded_page % (latest_page_possible - 1)) + 1; // from 1 up to latest_page_possible
-        const url = try std.fmt.allocPrint(allocator, template_url, .{ config.tld, page_num, page_size, config.catalog_id });
+        const catalog_str = try std.fmt.allocPrint(allocator, "{d}", .{config.catalog_id});
+        const url = try std.fmt.allocPrint(allocator, template_url, .{ config.tld, page_num, page_size, catalog_str });
+        allocator.free(catalog_str);
         defer allocator.free(url);
         var time_spent_query = std.time.milliTimestamp();
         const result = try fingerprinted_get(allocator, easy, url);
@@ -111,12 +116,12 @@ pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Eas
     return null;
 }
 
-pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Easy, catalog_id: []const u8, tld: []const u8, new_total: u32) !?Parsed(WatermarkedResponse) {
+pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Easy, catalog_id: u16, tld: []const u8, new_total: u32) !?Parsed(WatermarkedResponse) {
     for (1..111) |punch| {
         loop: for (available_page_sizes) |size| {
             const zero_pad = try repeatZ(allocator, "0", punch);
             defer allocator.free(zero_pad);
-            const tweaked_catalog_id = try std.fmt.allocPrint(allocator, "+{s}{s}", .{ zero_pad, catalog_id });
+            const tweaked_catalog_id = try std.fmt.allocPrint(allocator, "+{s}{d}", .{ zero_pad, catalog_id });
             defer allocator.free(tweaked_catalog_id);
             const fetch_url = try std.fmt.allocPrint(allocator, template_url, .{ tld, 1, size, tweaked_catalog_id });
             defer allocator.free(fetch_url);

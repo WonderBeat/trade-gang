@@ -11,15 +11,17 @@ const ManagedStruct = protobuf.ManagedStruct;
 
 pub const Announcement = struct {
     ts: u64 = 0,
-    signature: ManagedString = .Empty,
-    is_delist: bool = false,
+    catalog: u32 = 0,
+    title: ManagedString = .Empty,
     tokens: ArrayList(ManagedString),
+    signature: ManagedString = .Empty,
 
     pub const _desc_table = .{
         .ts = fd(1, .{ .Varint = .Simple }),
-        .signature = fd(2, .Bytes),
-        .is_delist = fd(3, .{ .Varint = .Simple }),
+        .catalog = fd(2, .{ .Varint = .Simple }),
+        .title = fd(3, .String),
         .tokens = fd(4, .{ .List = .String }),
+        .signature = fd(5, .Bytes),
     };
 
     pub usingnamespace protobuf.MessageMixins(@This());

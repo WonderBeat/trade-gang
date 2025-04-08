@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tall.proto\x12\x06protos\"P\n\x0c\x41nnouncement\x12\n\n\x02ts\x18\x01 \x01(\x04\x12\x11\n\tsignature\x18\x02 \x01(\x0c\x12\x11\n\tis_delist\x18\x03 \x01(\x08\x12\x0e\n\x06tokens\x18\x04 \x03(\tb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tall.proto\x12\x06protos\"]\n\x0c\x41nnouncement\x12\n\n\x02ts\x18\x01 \x01(\x04\x12\x0f\n\x07\x63\x61talog\x18\x02 \x01(\r\x12\r\n\x05title\x18\x03 \x01(\t\x12\x0e\n\x06tokens\x18\x04 \x03(\t\x12\x11\n\tsignature\x18\x05 \x01(\x0c\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,5 +32,5 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'all_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_ANNOUNCEMENT']._serialized_start=21
-  _globals['_ANNOUNCEMENT']._serialized_end=101
+  _globals['_ANNOUNCEMENT']._serialized_end=114
 # @@protoc_insertion_point(module_scope)

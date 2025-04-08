@@ -60,11 +60,11 @@ pub fn main() !void {
             const tokens = try parse.extract_coins_from_text(allocator, title);
             defer allocator.free(tokens);
             const ip = try resolve_address(address);
-            _ = try messaging.send_announce(allocator, ip, &tokens, std.time.milliTimestamp(), false);
+            _ = try messaging.send_announce(allocator, ip, &tokens, std.time.milliTimestamp(), 69, &"LOVE YOU");
             return;
         } else if (matches.subcommandMatches("punch")) |punch_cmd| {
             const id = punch_cmd.getSingleValue("id") orelse return;
-            const catalog = punch_cmd.getSingleValue("catalog") orelse return;
+            const catalog = try std.fmt.parseInt(u16, punch_cmd.getSingleValue("catalog") orelse return, 0);
             const curl_module = try wcurl.Curl.init(allocator);
             defer curl_module.deinit();
             const easy = curl_module.easy;
@@ -77,16 +77,10 @@ pub fn main() !void {
         }
     }
 
-    // const japan = try zeit.loadTimeZone(allocator, .@"Asia/Tokyo", null);
-    // defer japan.deinit();
-    // const now = try zeit.instant(.{});
-    // const japan_time = now.in(&japan);
-    // try japan_time.time().strftime(std.io.getStdOut().writer(), "%Y-%m-%d %H:%M:%S %Z");
-    //
-    const catalog = std.posix.getenv("CATALOG") orelse "93";
+    const catalog = try std.fmt.parseInt(u16, std.posix.getenv("CATALOG") orelse "93", 0);
     const tld = std.posix.getenv("TLD") orelse "com";
     const send_announce_address = try resolve_address(std.posix.getenv("ANNOUNCE_DELIVERY_ADDR") orelse "127.0.0.1:8081");
-    std.log.debug("Catalog {s} home address {}", .{ catalog, send_announce_address });
+    std.log.debug("Catalog {d} home address {}", .{ catalog, send_announce_address });
 
     const iterations = if (is_debug) 2 else 100;
     var prng = std.Random.DefaultPrng.init(blk: {
@@ -119,23 +113,23 @@ pub fn main() !void {
                     std.log.warn("Mailformed announce {s}", .{update.value.response});
                     break :no_update;
                 };
-                if (announce.id != update.value.id and announce.title.len < 5 and announce.ts > 0) {
+                if (announce.title.len < 5 or announce.ts < 1000) {
                     std.log.warn("Mailformed announce {d}:{d} {s}({d})", .{ announce.id, update.value.id, announce.title, announce.ts });
                     break :no_update;
                 }
                 const ts = std.time.timestamp();
-                std.log.info("Timestamps: ours {d}, theirs {d}, diff: {d}", .{ ts, announce.ts, ts - @divFloor(announce.ts, 1000) });
+                std.log.info("Timestamps: ours {d} announcement {d}, diff: {d}", .{ ts, announce.ts, ts - @divFloor(announce.ts, 1000) });
                 const coins = try parse.extract_coins_from_text(allocator, announce.title);
                 defer allocator.free(coins);
-                const is_delist = (std.ascii.indexOfIgnoreCase(announce.title, "will delist") orelse 0) > 0;
-                if (coins.len == 0 and is_delist) {
+                const is_important = parse.listing_delisting(announce.title) >= 3;
+                if (coins.len == 0 and is_important) {
                     std.log.warn("No coins found {d} {s}", .{ announce.id, announce.title });
                     break :no_update;
                 }
-                const bytes_count = messaging.send_announce(allocator, send_announce_address, &coins, announce.ts, is_delist) catch 0;
+                const bytes_count = messaging.send_announce(allocator, send_announce_address, &coins, announce.ts, catalog, &announce.title) catch 0;
                 std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ update.value.id, bytes_count });
-                if (is_delist) {
-                    std.log.info("DELISTING", .{});
+                if (is_important) {
+                    std.log.info("ALARM", .{});
                     std.time.sleep(std.time.ns_per_s * std.time.s_per_hour * 24); // nothing to do here
                 }
             } else {
@@ -145,7 +139,6 @@ pub fn main() !void {
             std.time.sleep(std.time.ns_per_s * 1);
         }
     }
-    //try bin.wait_for_announcement(allocator, seed);
 }
 
 fn resolve_address(address_with_port: []const u8) !std.net.Address {

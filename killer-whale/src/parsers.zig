@@ -3,6 +3,34 @@ const expect = std.testing.expect;
 
 const ParsedAnnounce = struct { id: u32, title: []const u8, ts: i64 };
 
+// detects if title contains listing or delisting
+// returns confidence level
+// 0 means not found
+pub fn listing_delisting(title: []const u8) u8 {
+    const has_list = greater_than_zero(std.ascii.indexOfIgnoreCase(title, " will list"));
+    const has_delist = greater_than_zero(std.ascii.indexOfIgnoreCase(title, " will delist"));
+    const has_binance: u8 = if (std.ascii.startsWithIgnoreCase(title, "binance")) 1 else 0;
+    const has_vote = greater_than_zero(std.ascii.indexOfIgnoreCase(title, "vote "));
+    const has_year = greater_than_zero(std.ascii.indexOfIgnoreCase(title, " 20"));
+    return has_list + has_delist + has_binance + has_vote + has_year;
+}
+
+inline fn greater_than_zero(value: ?usize) u8 {
+    if (value == null or value.? == 0) {
+        return 0;
+    } else {
+        return 1;
+    }
+}
+
+test "detect delisting" {
+    try expect(listing_delisting("Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26") == 3);
+
+    try expect(listing_delisting("Binance Announced the First Batch of Vote to Delist Results and Will Delist BADGER, BAL, BETA, CREAM, CTXC, ELF, FIRO, HARD, NULS, PROS, SNT, TROY, UFT, VIDT on 2025-04-16") == 4);
+    try expect(listing_delisting("Binance Announced the First Batch of Vote to Delist Results and Will Delist BADGER, BAL, BETA, CREAM, CTXC, ELF, FIRO, HARD, NULS, PROS, SNT, TROY, UFT, VIDT on 2025-04-16") == 4);
+    try expect(listing_delisting("Binance Announced the First Batch of Vote to List Results and Will List Mubarak (MUBARAK), CZ'S Dog (BROCCOLI714), Tutorial (TUT), and Banana For Scale (BANANAS31) With Seed Tags Applied") == 3);
+}
+
 pub fn extract_announce_content(body: []const u8) ?ParsedAnnounce {
     const id_needle = "\"id\":";
     const title_needle = "\"title\":\"";
@@ -52,11 +80,11 @@ pub fn extract_coins_from_text(allocator: std.mem.Allocator, text: []const u8) !
     while (i < text.len) {
         if (std.ascii.isUpper(text[i])) {
             var j: usize = i;
-            while (j < text.len and std.ascii.isUpper(text[j])) {
+            while (j < text.len and (std.ascii.isUpper(text[j]) or std.ascii.isDigit(text[j]))) {
                 j += 1;
             }
             const coin = text[i..j];
-            if (coin.len >= 2 and coin.len <= 5) {
+            if (coin.len >= 3 and coin.len <= 12) {
                 try list.append(coin);
                 i = j;
             } else {
@@ -92,4 +120,16 @@ test "extract coins from title 2" {
     try expect(std.mem.eql(u8, result[3], "LOOM"));
     try expect(std.mem.eql(u8, result[4], "REEF"));
     try expect(std.mem.eql(u8, result[5], "VGX"));
+}
+
+test "extract coins from title 3" {
+    const alloc = std.testing.allocator;
+    const title =
+        "Binance Announced the First Batch of Vote to List Results and Will List Mubarak (MUBARAK), CZ'S Dog (BROCCOLI714), Tutorial (TUT), and Banana For Scale (BANANAS31) With Seed Tags Applied";
+    const result = try extract_coins_from_text(alloc, title);
+    defer alloc.free(result);
+    try expect(std.mem.eql(u8, result[0], "MUBARAK"));
+    try expect(std.mem.eql(u8, result[1], "BROCCOLI714"));
+    try expect(std.mem.eql(u8, result[2], "TUT"));
+    try expect(std.mem.eql(u8, result[3], "BANANAS31"));
 }

@@ -34,10 +34,11 @@ class BaseMessage(metaclass=ABCMeta):
 
 
 @dataclass
-class PageEntry(BaseMessage):
+class PageEntry:
     title: str
     ts: int
     tokens: Set[str]
+    catalog_id: int
 
 
 @dataclass
@@ -60,14 +61,14 @@ async def run_udp_server():
         message.ParseFromString(data)  # .decode("utf-8")
         json_forward_announce = NewAnnounces(
             "bombardino coccodrillo",
-            [PageEntry("empty", message.ts, list(message.tokens))],
+            [
+                PageEntry(
+                    message.title, message.ts, list(message.tokens), message.catalog
+                )
+            ],
             dry_run=TEST_MODE,
         )
         logger.info(f"Received {json_forward_announce.to_json_str()} from {addr}")
-
-        if not message.is_delist:
-            logger.info("Not a delisting event")
-            continue
 
         try:
             async with websockets.connect(WEBSOCKET_SERVER_URI) as websocket:

@@ -4,17 +4,19 @@ const protobuf = @import("protobuf");
 const os = std.os;
 const posix = std.posix;
 
-pub fn send_announce(allocator: std.mem.Allocator, address: std.net.Address, tokens: *const []const []const u8, ts: i64, is_delist: bool) !usize {
+pub fn send_announce(allocator: std.mem.Allocator, address: std.net.Address, tokens: *const []const []const u8, ts: i64, catalog: u16, title: *const []const u8) !usize {
     var array = std.ArrayList(protobuf.ManagedString).init(allocator);
     defer array.deinit();
 
     for (tokens.*) |token| {
         try array.append(protobuf.ManagedString.managed(token));
     }
+    const managed_title = protobuf.ManagedString.managed(title.*[0..@min(title.len, 40)]);
     const announce = protos.Announcement{
         .ts = @intCast(ts), //
         .tokens = array,
-        .is_delist = is_delist,
+        .catalog = catalog,
+        .title = managed_title,
     };
 
     const tpe: u32 = posix.SOCK.DGRAM;
