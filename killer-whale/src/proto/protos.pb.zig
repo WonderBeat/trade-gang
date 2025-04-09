@@ -13,6 +13,7 @@ pub const Announcement = struct {
     ts: u64 = 0,
     catalog: u32 = 0,
     title: ManagedString = .Empty,
+    call_to_action: bool = false,
     tokens: ArrayList(ManagedString),
     signature: ManagedString = .Empty,
 
@@ -20,8 +21,9 @@ pub const Announcement = struct {
         .ts = fd(1, .{ .Varint = .Simple }),
         .catalog = fd(2, .{ .Varint = .Simple }),
         .title = fd(3, .String),
-        .tokens = fd(4, .{ .List = .String }),
-        .signature = fd(5, .Bytes),
+        .call_to_action = fd(4, .{ .Varint = .Simple }),
+        .tokens = fd(5, .{ .List = .String }),
+        .signature = fd(6, .Bytes),
     };
 
     pub usingnamespace protobuf.MessageMixins(@This());

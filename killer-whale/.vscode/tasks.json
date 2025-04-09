@@ -12,6 +12,16 @@
       }
     },
     {
+      "label": "Build Tests",
+      "type": "shell",
+      "command": "zig build test",
+      "group": "test",
+      "presentation": {
+        //"reveal": "always"
+        //  "panel": "new"
+      }
+    },
+    {
       "label": "RUN",
       "type": "shell",
       "command": "./zig-out/bin/app",

@@ -2,17 +2,17 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "(gdb) Launchs",
+      "name": "(gdb) tests",
       "type": "codelldb",
       "request": "launch",
-      "program": "./zig-out/bin/test-native",
+      "program": "./zig-out/build/test",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "environment": [],
       "externalConsole": false,
       "MIMode": "gdb",
-      "preLaunchTask": "build",
+      "preLaunchTask": "Build Tests",
       "setupCommands": [
         {
           "description": "Enable pretty-printing for gdb",

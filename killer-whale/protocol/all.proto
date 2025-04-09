@@ -5,6 +5,7 @@ message Announcement {
     uint64 ts = 1;
     uint32 catalog = 2;
     string title = 3;
-    repeated string tokens = 4;
-    bytes signature = 5;
+    bool call_to_action = 4;
+    repeated string tokens = 5;
+    bytes signature = 6;
 }

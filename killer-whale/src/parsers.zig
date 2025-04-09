@@ -84,9 +84,15 @@ pub fn extract_coins_from_text(allocator: std.mem.Allocator, text: []const u8) !
                 j += 1;
             }
             const coin = text[i..j];
-            if (coin.len >= 3 and coin.len <= 12) {
-                try list.append(coin);
-                i = j;
+            const in_the_middle = i > 0 and j < text.len;
+            if (in_the_middle) {
+                const has_no_chars_on_side = !std.ascii.isAlphabetic(text[i - 1]) and !std.ascii.isAlphabetic(text[j]);
+                if (has_no_chars_on_side and coin.len >= 3 and coin.len <= 12) {
+                    try list.append(coin);
+                    i = j;
+                } else {
+                    i += 1;
+                }
             } else {
                 i += 1;
             }
@@ -132,4 +138,15 @@ test "extract coins from title 3" {
     try expect(std.mem.eql(u8, result[1], "BROCCOLI714"));
     try expect(std.mem.eql(u8, result[2], "TUT"));
     try expect(std.mem.eql(u8, result[3], "BANANAS31"));
+}
+
+test "extract coins from title 4" {
+    const alloc = std.testing.allocator;
+    const title =
+        "Introducing Babylon (BABY) on Binance HODLer Airdrops! Earn BABY With Retroactive BNB Simple Earn Subscriptions";
+    const result = try extract_coins_from_text(alloc, title);
+    defer alloc.free(result);
+    try expect(std.mem.eql(u8, result[0], "BABY"));
+    try expect(std.mem.eql(u8, result[1], "BABY"));
+    try expect(std.mem.eql(u8, result[2], "BNB"));
 }

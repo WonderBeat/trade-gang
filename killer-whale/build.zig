@@ -74,6 +74,8 @@ pub fn build(b: *std.Build) !void {
     unit_tests.linkSystemLibrary("curl");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
+    const test_binary = b.addInstallArtifact(unit_tests, .{});
+    test_step.dependOn(&test_binary.step);
     test_step.dependOn(&run_unit_tests.step);
 
     const gen_proto = b.step("gen-proto", "generates zig files from protocol buffer definitions");

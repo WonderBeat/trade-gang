@@ -60,7 +60,8 @@ pub fn main() !void {
             const tokens = try parse.extract_coins_from_text(allocator, title);
             defer allocator.free(tokens);
             const ip = try resolve_address(address);
-            _ = try messaging.send_announce(allocator, ip, &tokens, std.time.milliTimestamp(), 69, &"LOVE YOU");
+            const bytes_sent = try messaging.send_announce(allocator, ip, &tokens, 77777, 69, &"LOVE YOU", false);
+            std.log.debug("Msg sent {d} bytes", .{bytes_sent});
             return;
         } else if (matches.subcommandMatches("punch")) |punch_cmd| {
             const id = punch_cmd.getSingleValue("id") orelse return;
@@ -82,7 +83,7 @@ pub fn main() !void {
     const send_announce_address = try resolve_address(std.posix.getenv("ANNOUNCE_DELIVERY_ADDR") orelse "127.0.0.1:8081");
     std.log.debug("Catalog {d} home address {}", .{ catalog, send_announce_address });
 
-    const iterations = if (is_debug) 2 else 100;
+    const iterations = if (is_debug) 10 else 100;
     var prng = std.Random.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
         try std.posix.getrandom(std.mem.asBytes(&seed));
@@ -126,11 +127,13 @@ pub fn main() !void {
                     std.log.warn("No coins found {d} {s}", .{ announce.id, announce.title });
                     break :no_update;
                 }
-                const bytes_count = messaging.send_announce(allocator, send_announce_address, &coins, announce.ts, catalog, &announce.title) catch 0;
+                const bytes_count = messaging.send_announce(allocator, send_announce_address, &coins, announce.ts, catalog, &announce.title, is_important) catch 0;
                 std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ update.value.id, bytes_count });
                 if (is_important) {
                     std.log.info("ALARM", .{});
                     std.time.sleep(std.time.ns_per_s * std.time.s_per_hour * 24); // nothing to do here
+                } else {
+                    std.time.sleep(std.time.ns_per_s * std.time.s_per_min * 1);
                 }
             } else {
                 std.log.err("Punching was not successfull: {d}", .{new_total});

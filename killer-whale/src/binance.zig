@@ -81,20 +81,33 @@ pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Eas
         }
         const seeded_page = page_index + config.seed;
         const page_size = available_page_sizes[seeded_page % available_page_sizes.len];
-        const latest_page_possible: u16 = switch (page_size) {
-            2 => 950,
-            3 => 100,
-            5 => 300,
-            10 => 200,
-            15 => 100,
-            20 => 100,
-            50 => 40,
-            else => 100,
-        }; // hard limit
+        const latest_page_possible: u16 = switch (config.catalog_id) {
+            161 => switch (page_size) { // 280 max
+                2 => 100,
+                3 => 90,
+                5 => 50,
+                10 => 27,
+                15 => 9,
+                20 => 7,
+                50 => 3,
+                else => 8,
+            },
+            else => switch (page_size) {
+                2 => 950,
+                3 => 100,
+                5 => 300,
+                10 => 200,
+                15 => 100,
+                20 => 100,
+                50 => 40,
+                else => 100,
+            },
+        };
+
         const page_num = (seeded_page % (latest_page_possible - 1)) + 1; // from 1 up to latest_page_possible
         const catalog_str = try std.fmt.allocPrint(allocator, "{d}", .{config.catalog_id});
+        defer allocator.free(catalog_str);
         const url = try std.fmt.allocPrint(allocator, template_url, .{ config.tld, page_num, page_size, catalog_str });
-        allocator.free(catalog_str);
         defer allocator.free(url);
         var time_spent_query = std.time.milliTimestamp();
         const result = try fingerprinted_get(allocator, easy, url);
@@ -102,11 +115,12 @@ pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Eas
         const new_total = result.value.id;
         std.log.debug("ID {d} for {s} in {d}ms", .{ new_total, url, time_spent_query });
         if (new_total > latest_total.*) {
-            if (latest_total.* != 0) {
-                std.log.debug("Total updated {d},{d}", .{ latest_total.*, new_total });
+            const prev_total = latest_total.*;
+            latest_total.* = result.value.id;
+            if (prev_total != 0) {
+                std.log.debug("Total updated {d},{d}", .{ prev_total, new_total });
                 return result;
             }
-            latest_total.* = result.value.id;
         }
         result.deinit();
         const sleep_remaning: u64 = @intCast(@max(50, (5 * std.time.ms_per_s) - time_spent_query)); // min 50ms sleep
@@ -117,7 +131,7 @@ pub fn wait_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Eas
 }
 
 pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Easy, catalog_id: u16, tld: []const u8, new_total: u32) !?Parsed(WatermarkedResponse) {
-    for (1..111) |punch| {
+    for (1..400) |punch| {
         loop: for (available_page_sizes) |size| {
             const zero_pad = try repeatZ(allocator, "0", punch);
             defer allocator.free(zero_pad);
@@ -125,7 +139,10 @@ pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Eas
             defer allocator.free(tweaked_catalog_id);
             const fetch_url = try std.fmt.allocPrint(allocator, template_url, .{ tld, 1, size, tweaked_catalog_id });
             defer allocator.free(fetch_url);
+            var time_spent_query = std.time.milliTimestamp();
             const response = fingerprinted_get(allocator, easy, fetch_url) catch |erz| {
+                time_spent_query = std.time.milliTimestamp() - time_spent_query;
+
                 std.log.debug("Punching {d}:{s}: {s}", .{ punch, fetch_url, @errorName(erz) });
                 continue :loop; // ignore errors;
             };
@@ -134,8 +151,10 @@ pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Eas
             } else {
                 response.deinit();
             }
+            const sleep_remaning: u64 = @intCast(@max(0, 289 - time_spent_query)); // max 289 ms sleep
+            std.time.sleep(sleep_remaning * std.time.ns_per_ms);
         }
-        std.time.sleep(std.time.ns_per_ms * 111);
+        std.time.sleep(std.time.ns_per_ms * 100);
     }
     return null;
 }
