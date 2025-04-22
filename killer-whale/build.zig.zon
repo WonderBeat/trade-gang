@@ -38,6 +38,10 @@
             .url = "git+https://github.com/prajwalch/yazap/?ref=v0.6.3#71490491b8f1b0741218160b88cf0a87d2a941ce",
             .hash = "yazap-0.6.3-Z1t-EiLlAQCR5mUSOlF1PovnwyPcIUGeV02lAIVMUEOc",
         },
+        .mqttz = .{
+            .url = "https://github.com/karlseguin/mqttz/archive/3e43f007fee79daaaaa27fa99407b10f6e6bc694.tar.gz",
+            .hash = "mqttz-0.0.0-ywFE_xXwAgBlpM_ArncPr0O8cPoDgDSmE8FLc3p5vOUT",
+        },
     },
     .paths = .{
         "build.zig",

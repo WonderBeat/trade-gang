@@ -1,11 +1,12 @@
 services:
   udp-to-websocket:
-    image: harbor.gladiators.dev/library/udp-to-websocket:latest
+    image: harbor.gladiators.dev/library/mothership:latest
     network_mode: "host"
     restart: on-failure
     container_name: udp-to-websocket
     environment:
       - DRY_RUN=0
+      - RELAY=1
       - WEBSOCKET_SERVER_URI=ws://149.28.27.193:8765
     # ports:
     #   - "8081:8081/udp"

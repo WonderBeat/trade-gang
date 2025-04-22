@@ -150,3 +150,54 @@ test "extract coins from title 4" {
     try expect(std.mem.eql(u8, result[1], "BABY"));
     try expect(std.mem.eql(u8, result[2], "BNB"));
 }
+
+pub const Tld = enum {
+    Info,
+    Com,
+    Me,
+
+    pub fn to_string(self: Tld) []const u8 {
+        return switch (self) {
+            .Info => "info",
+            .Com => "com",
+            .Me => "me",
+        };
+    }
+
+    pub fn from_string(s: []const u8) ?Tld {
+        if (std.mem.eql(u8, s, "info")) {
+            return .Info;
+        } else if (std.mem.eql(u8, s, "com")) {
+            return .Com;
+        } else if (std.mem.eql(u8, s, "me")) {
+            return .Me;
+        } else {
+            return null;
+        }
+    }
+
+    pub fn to_i32(self: Tld) i32 {
+        return @intFromEnum(self);
+    }
+
+    pub fn from_i32(i: i32) ?Tld {
+        return switch (i) {
+            0 => .Info,
+            1 => .Com,
+            2 => .Me,
+            else => null,
+        };
+    }
+};
+
+test "Tld to_string" {
+    try expect(std.mem.eql(u8, Tld.Info.to_string(), "info"));
+    try expect(std.mem.eql(u8, Tld.Com.to_string(), "com"));
+    try expect(std.mem.eql(u8, Tld.Me.to_string(), "me"));
+}
+
+test "Tld to_i32" {
+    try expect(Tld.Info.to_i32() == 0);
+    try expect(Tld.Com.to_i32() == 1);
+    try expect(Tld.Me.to_i32() == 2);
+}

@@ -1,16 +1,20 @@
 const std = @import("std");
-//const yaml = @import("ymlz");
-const yazap = @import("yazap");
-//const zeit = @import("zeit");
 const builtin = @import("builtin");
-const bin = @import("binance.zig");
-const wcurl = @import("curl.zig");
-const messaging = @import("messaging.zig");
-const parse = @import("parsers.zig");
 
+const yazap = @import("yazap");
 const App = yazap.App;
 const Arg = yazap.Arg;
 
+const bin = @import("binance.zig");
+const messaging = @import("messaging.zig");
+const mqtt = @import("mqtt.zig");
+const parse = @import("parsers.zig");
+const wcurl = @import("curl.zig");
+
+const BINANME_TOPIC = if (builtin.mode == .Debug) "binance-test" else "binance";
+
+//const yaml = @import("ymlz");
+//const zeit = @import("zeit");
 pub const std_options = std.Options{
     .log_level = switch (builtin.mode) {
         .Debug => .debug,
@@ -39,7 +43,6 @@ pub fn main() !void {
     defer if (is_debug) {
         _ = debug_allocator.deinit();
     };
-
     if (is_debug) {
         var cmd_parser = App.init(allocator, "killer-whale", "Find and Eliminate");
         defer cmd_parser.deinit();
@@ -48,10 +51,18 @@ pub fn main() !void {
         var punch = cmd_parser.createCommand("punch", "Punch and exit");
         try punch.addArg(Arg.singleValueOption("id", 'i', "announce ID"));
         try punch.addArg(Arg.singleValueOption("catalog", 'c', "catalog ID"));
+        try punch.addArg(Arg.singleValueOption("anonymizer", 'a', "anonymizer address"));
+        try punch.addArg(Arg.singleValueOption("tld", 't', "TLD"));
+        var avalance = cmd_parser.createCommand("avalance", "avalance and exit");
+        try avalance.addArg(Arg.singleValueOption("mqtt", 'm', "mqtt address"));
+        try avalance.addArg(Arg.singleValueOption("catalog", 'c', "catalog ID"));
+        try avalance.addArg(Arg.singleValueOption("total", 't', "id to punch for"));
+        try avalance.addArg(Arg.singleValueOption("tld", 't', "TLD"));
         var root = cmd_parser.rootCommand();
         try root.addArg(Arg.singleValueOption("catalog", 'c', "catalog ID"));
         try root.addSubcommand(punch);
         try root.addSubcommand(message);
+        try root.addSubcommand(avalance);
         const matches = try cmd_parser.parseProcess();
 
         if (matches.subcommandMatches("message")) |message_cmd_matches| {
@@ -65,23 +76,45 @@ pub fn main() !void {
             return;
         } else if (matches.subcommandMatches("punch")) |punch_cmd| {
             const id = punch_cmd.getSingleValue("id") orelse return;
+            const address = punch_cmd.getSingleValue("anonymizer") orelse null;
+            const tld = punch_cmd.getSingleValue("tld") orelse "me";
             const catalog = try std.fmt.parseInt(u16, punch_cmd.getSingleValue("catalog") orelse return, 0);
             const curl_module = try wcurl.Curl.init(allocator);
             defer curl_module.deinit();
             const easy = curl_module.easy;
-            const update = try bin.punch_announce_update(allocator, &easy, catalog, "com", try std.fmt.parseInt(u32, id, 0));
+
+            const config = bin.PunchParams{ .catalog_id = catalog, .tld = tld, .seed = 1, .anonymizer = address };
+            const update = try bin.punch_announce_update(allocator, &easy, &config, try std.fmt.parseInt(u32, id, 0));
             if (update) |result| {
-                defer result.deinit();
-                std.log.info("Punched with result {d} -> {s}", .{ result.value.id, result.value.response });
+                std.log.info("Punched with result {s}...", .{result[0..300]});
+                allocator.free(result);
             }
+            return;
+        } else if (matches.subcommandMatches("avalance")) |avalance_cmd| {
+            const mqtt_address = avalance_cmd.getSingleValue("mqtt") orelse return;
+            const tld = avalance_cmd.getSingleValue("tld") orelse "me";
+            const catalog = try std.fmt.parseInt(u16, avalance_cmd.getSingleValue("catalog") orelse "98", 0);
+            const total = try std.fmt.parseInt(u16, avalance_cmd.getSingleValue("total") orelse "0", 0);
+            const mqtt_cli = try mqtt.Mqtt.init(allocator, mqtt_address);
+            defer {
+                mqtt_cli.deinit();
+            }
+            try send_mqtt_alert(mqtt_cli, catalog, total, parse.Tld.from_string(tld).?);
             return;
         }
     }
 
     const catalog = try std.fmt.parseInt(u16, std.posix.getenv("CATALOG") orelse "93", 0);
     const tld = std.posix.getenv("TLD") orelse "com";
-    const send_announce_address = try resolve_address(std.posix.getenv("ANNOUNCE_DELIVERY_ADDR") orelse "127.0.0.1:8081");
-    std.log.debug("Catalog {d} home address {}", .{ catalog, send_announce_address });
+    const send_announce_address = try resolve_address(std.posix.getenv("MOTHERSHIP") orelse {
+        std.log.err("Mothership address required", .{});
+        return;
+    });
+    const anonymizer = std.posix.getenv("ANONYMIZER");
+    const mqtt_address = std.posix.getenv("MQTT") orelse {
+        std.log.err("MQTT address required", .{});
+        return;
+    };
 
     const iterations = if (is_debug) 10 else 100;
     var prng = std.Random.DefaultPrng.init(blk: {
@@ -89,58 +122,168 @@ pub fn main() !void {
         try std.posix.getrandom(std.mem.asBytes(&seed));
         break :blk seed;
     });
+
     var latestTotal: u32 = 0;
+    const curl_module = try wcurl.Curl.init(allocator);
+    defer curl_module.deinit();
+    const client = try mqtt.Mqtt.init(allocator, mqtt_address);
+    _ = try client.subscribe(BINANME_TOPIC);
+    defer {
+        client.deinit();
+    }
+    const easy = curl_module.easy;
+
+    if (std.posix.getenv("PASSIVE")) |_| {
+        std.log.info("Passive mode ON: mothership {}, mqtt {s}", .{ send_announce_address, mqtt_address });
+        for (0..1000) |_| {
+            if (try passive_punch_mode(allocator, client, curl_module, 14000, anonymizer, 1, send_announce_address, null)) |_| {
+                std.time.sleep(std.time.ns_per_s * 30); // cooldown
+                return;
+            }
+            _ = try client.ping();
+        }
+        return;
+    }
+
+    std.log.debug("Catalog {d} home address {}", .{ catalog, send_announce_address });
     for (0..iterations) |_| {
         const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 10000);
-        const curl_module = try wcurl.Curl.init(allocator);
-        defer curl_module.deinit();
-        const easy = curl_module.easy;
-
-        try curl_module.set_trim_body(350);
-        const config = bin.ChangeWaitingParams{ .catalog_id = catalog, .tld = tld, .seed = seed };
-        const result = bin.wait_for_total_change(allocator, &easy, config, &latestTotal) catch |errz| none: {
-            std.log.err("fail {d}: {s}", .{ latestTotal, @errorName(errz) });
-            break :none null;
-        };
-        if (result) |change| {
-            defer change.deinit();
-            const new_total = change.value.id;
-            try curl_module.set_trim_body(3000);
-            const maybe_update = try bin.punch_announce_update(allocator, &easy, catalog, tld, new_total);
-            if (maybe_update) |update| no_update: {
-                defer update.deinit();
-                std.log.info("Found update {d} >>>> {s}", .{ update.value.id, update.value.response });
-                const announce = parse.extract_announce_content(update.value.response) orelse {
-                    std.log.warn("Mailformed announce {s}", .{update.value.response});
-                    break :no_update;
+        try curl_module.set_trim_body(100, 300);
+        const result: ?u32 = found: {
+            var config = bin.ChangeWaitingParams{ .catalog_id = catalog, .tld = tld, .seed = seed, .anonymizer = anonymizer };
+            for (1..100) |iter| {
+                var time_spent_query = std.time.milliTimestamp();
+                config.seed = seed + iter;
+                const maybe_change = bin.check_for_total_change(allocator, &easy, &config, &latestTotal) catch |errz| none: {
+                    std.log.err("fail {d}: {s}", .{ latestTotal, @errorName(errz) });
+                    break :none null;
                 };
-                if (announce.title.len < 5 or announce.ts < 1000) {
-                    std.log.warn("Mailformed announce {d}:{d} {s}({d})", .{ announce.id, update.value.id, announce.title, announce.ts });
-                    break :no_update;
+                if (iter % 3 == 0) {
+                    try client.ping();
                 }
-                const ts = std.time.timestamp();
-                std.log.info("Timestamps: ours {d} announcement {d}, diff: {d}", .{ ts, announce.ts, ts - @divFloor(announce.ts, 1000) });
-                const coins = try parse.extract_coins_from_text(allocator, announce.title);
-                defer allocator.free(coins);
-                const is_important = parse.listing_delisting(announce.title) >= 3;
-                if (coins.len == 0 and is_important) {
-                    std.log.warn("No coins found {d} {s}", .{ announce.id, announce.title });
-                    break :no_update;
+                if (maybe_change) |change| {
+                    send_mqtt_alert(client, catalog, change, parse.Tld.from_string(tld).?) catch |errz| {
+                        std.log.warn("Mqtt send error {s}", .{@errorName(errz)});
+                    };
+                    break :found change;
                 }
-                const bytes_count = messaging.send_announce(allocator, send_announce_address, &coins, announce.ts, catalog, &announce.title, is_important) catch 0;
-                std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ update.value.id, bytes_count });
-                if (is_important) {
-                    std.log.info("ALARM", .{});
-                    std.time.sleep(std.time.ns_per_s * std.time.s_per_hour * 24); // nothing to do here
-                } else {
-                    std.time.sleep(std.time.ns_per_s * std.time.s_per_min * 1);
+                time_spent_query = std.time.milliTimestamp() - time_spent_query;
+                const sleep_remaning: i32 = @intCast(@max(50, (6 * std.time.ms_per_s) - time_spent_query)); // min 50ms sleep, max 6s
+
+                std.log.debug("spleeping for {d}ms", .{sleep_remaning});
+                if (try passive_punch_mode(
+                    allocator,
+                    client,
+                    curl_module,
+                    sleep_remaning,
+                    anonymizer,
+                    seed,
+                    send_announce_address,
+                    parse.Tld.from_string(tld).?,
+                )) |update| {
+                    if (update.catalog == catalog) {
+                        latestTotal = update.total;
+                    }
+                    try client.ping();
+                    std.time.sleep(std.time.ns_per_s * 15); // cooldown
+                    try client.ping();
                 }
-            } else {
-                std.log.err("Punching was not successfull: {d}", .{new_total});
             }
-        } else {
-            std.time.sleep(std.time.ns_per_s * 1);
+            break :found null;
+        };
+
+        if (result) |new_total| {
+            std.log.info("Catalog update signal {d}", .{new_total});
+            const config = bin.PunchParams{ .catalog_id = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed };
+            try punch_notify(allocator, curl_module, send_announce_address, &config, new_total);
+            latestTotal = new_total;
         }
+
+        try client.ping();
+        std.time.sleep(std.time.ns_per_s * 1);
+    }
+}
+
+fn send_mqtt_alert(cli: *mqtt.Mqtt, catalog: u16, total: u32, tld: parse.Tld) !void {
+    var buf: [30:0]u8 = undefined;
+    const mqttMsg = try std.fmt.bufPrint(&buf, "{d}|{d}|{s}", .{ catalog, total, tld.to_string() });
+    _ = try cli.send(BINANME_TOPIC, mqttMsg);
+}
+
+fn passive_punch_mode(
+    allocator: std.mem.Allocator,
+    mqtt_cli: *mqtt.Mqtt,
+    curl_cli: *wcurl.Curl,
+    timeout: i32,
+    anonymizer: ?[]const u8,
+    seed: usize,
+    send_announce_address: std.net.Address,
+    overwrite_tld: ?parse.Tld,
+) !?struct { catalog: u16, total: u32 } {
+    if (try wait_for_message(allocator, mqtt_cli, timeout)) |alert| {
+        const alert_tld = (overwrite_tld orelse alert.tld).to_string();
+        std.log.info("Cooperative punching activated {d}:{d}:{s}", .{ alert.catalog, alert.total, alert_tld });
+        const conf = bin.PunchParams{ .catalog_id = alert.catalog, .tld = alert_tld, .seed = seed, .anonymizer = anonymizer };
+        _ = try punch_notify(allocator, curl_cli, send_announce_address, &conf, alert.total);
+        return .{ .catalog = alert.catalog, .total = alert.total };
+    }
+    return null;
+}
+
+fn wait_for_message(
+    allocator: std.mem.Allocator,
+    mqtt_cli: *mqtt.Mqtt,
+    timeout: i32,
+) !?struct { catalog: u16, total: u32, tld: parse.Tld } {
+    if (try mqtt_cli.receive_string(timeout)) |alert| {
+        defer allocator.free(alert);
+        var iterator = std.mem.splitScalar(u8, alert, '|');
+        const alert_catalog = try std.fmt.parseInt(u16, iterator.first(), 0);
+        const alert_latestTotal: u32 = try std.fmt.parseInt(u32, iterator.next().?, 0);
+        const tld = parse.Tld.from_string(iterator.next().?) orelse return error.MqttMsgErr;
+        return .{ .catalog = alert_catalog, .total = alert_latestTotal, .tld = tld };
+    }
+    return null;
+}
+
+fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *const bin.PunchParams, new_total: u32) !void {
+    try curl_cli.set_trim_body(50, 3000);
+    const easy = curl_cli.easy;
+    const maybe_update = try bin.punch_announce_update(allocator, &easy, config, new_total);
+    if (maybe_update) |update| no_update: {
+        defer allocator.free(update);
+        const updated_id = bin.extract_total(update) orelse {
+            std.log.warn("No total in update {s}", .{update});
+            break :no_update;
+        };
+        std.log.info("Punch success 🚀 {d}: {s}", .{ updated_id, update });
+        const announce = parse.extract_announce_content(update) orelse {
+            std.log.warn("Mailformed announce {s}", .{update});
+            break :no_update;
+        };
+        if (announce.title.len < 5 or announce.ts < 1000) {
+            std.log.warn("Mailformed announce {d}:{d} {s}({d})", .{ announce.id, updated_id, announce.title, announce.ts });
+            break :no_update;
+        }
+        const ts = std.time.timestamp();
+        std.log.info("Timestamps: ours {d} announcement {d}, diff: {d}", .{ ts, announce.ts, ts - @divFloor(announce.ts, 1000) });
+        const coins = try parse.extract_coins_from_text(allocator, announce.title);
+        defer allocator.free(coins);
+        const is_important = parse.listing_delisting(announce.title) >= 3;
+        if (coins.len == 0 and is_important) {
+            std.log.warn("No coins found {d} {s}", .{ announce.id, announce.title });
+            break :no_update;
+        }
+        const bytes_count = messaging.send_announce(allocator, announce_url, &coins, announce.ts, config.catalog_id, &announce.title, is_important) catch 0;
+        std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ updated_id, bytes_count });
+        if (is_important) {
+            std.log.info("🔴 Call to action sent", .{});
+            std.time.sleep(std.time.ns_per_s * std.time.s_per_hour * 1); // nothing to do here
+        } else {
+            std.time.sleep(std.time.ns_per_s * std.time.s_per_min * 1);
+        }
+    } else {
+        std.log.err("Punching was not successfull: {d}", .{new_total});
     }
 }
 

@@ -5,7 +5,7 @@
       "name": "(gdb) tests",
       "type": "codelldb",
       "request": "launch",
-      "program": "./zig-out/build/test",
+      "program": "./zig-out/bin/test",
       "args": [],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
@@ -13,6 +13,53 @@
       "externalConsole": false,
       "MIMode": "gdb",
       "preLaunchTask": "Build Tests",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    {
+      "name": "me test",
+      "type": "codelldb",
+      "request": "launch",
+      "program": "zig-out/bin/app",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "MOTHERSHIP": "127.0.0.1:8080",
+        "MQTT": "10.46.114.82",
+        "ANONYMIZER": "127.0.0.1:8880/scrape",
+        "CATALOG": "161",
+        "TLD": "me"
+      },
+      "environment": [
+        {
+          "name": "MQTT",
+          "value": "10.46.114.82"
+        },
+        {
+          "name": "MOTHERSHIP",
+          "value": "127.0.0.1:8080"
+        },
+        {
+          "name": "ANONYMIZER",
+          "value": "127.0.0.1:8081/scrape"
+        },
+        {
+          "name": "CATALOG",
+          "value": "161"
+        },
+        {
+          "name": "TLD",
+          "value": "me"
+        }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
       "setupCommands": [
         {
           "description": "Enable pretty-printing for gdb",

@@ -44,15 +44,15 @@ pub const Curl = struct {
         const self = try allocator.create(Self);
         const headers = try self.easy.createHeaders();
         self.* = .{ .allocator = allocator, .ca_bundle = ca_bundle, .easy = easy, .headers = headers };
-        try self.setup_headers(0);
+        try self.setup_headers(0, 0);
         return self;
     }
 
-    pub fn set_trim_body(self: *Self, size: u32) !void {
-        try self.setup_headers(size);
+    pub fn set_trim_body(self: *Self, trim_from: u32, trim_to: u32) !void {
+        try self.setup_headers(trim_from, trim_to);
     }
 
-    fn setup_headers(self: *Self, size: u32) !void {
+    fn setup_headers(self: *Self, trim_from: u32, trim_to: u32) !void {
         self.headers.deinit();
         const headers = blk: {
             var h = try self.easy.createHeaders();
@@ -62,9 +62,10 @@ pub const Curl = struct {
             //try h.add("User-Agent", "Firefox/135.0");
             //try h.add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:135.0) Gecko/20100101 Firefox/135.0");
             try h.add("Accep-Language", "en-US,en;q=0.5");
-            if (size > 0) {
+            //try h.add("Accep-Encoding", "deflate, gzip;q=1.0, *;q=0.5");
+            if (trim_to > 0) {
                 var buf: [20]u8 = undefined;
-                const size_str = try std.fmt.bufPrint(&buf, "bytes=0-{d}", .{size});
+                const size_str = try std.fmt.bufPrint(&buf, "bytes={d}-{d}", .{ trim_from, trim_to });
                 try h.add("Range", size_str);
             }
             //try h.add("User-Agent", user_agent);
