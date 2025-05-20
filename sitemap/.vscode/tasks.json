@@ -6,7 +6,7 @@
     {
       "label": "Debugger",
       "type": "shell",
-      "command": "bun run --watch --inspect-brk=localhost:3000/prefix --port 3000 index.ts",
+      "command": "bun run --watch --inspect-brk=localhost:3000/prefix --port 3000 experiment.ts",
       "group": "test",
       //      "presentation": {
       //        "reveal": "always",
@@ -22,7 +22,7 @@
     {
       "label": "Run",
       "type": "shell",
-      "command": "bun run ./index.ts",
+      "command": "bun run ./experiment.ts",
       "group": "test"
     }
   ]
