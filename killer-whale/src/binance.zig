@@ -3,11 +3,13 @@ const expect = std.testing.expect;
 const http = std.http;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const builtin = @import("builtin");
+const proxy = @import("proxy-manager.zig");
 
 const curl = @import("curl");
 
 const files = @import("file/files.zig");
 const messaging = @import("messaging.zig");
+const page = @import("page.zig");
 const wcurl = @import("curl.zig");
 
 pub fn Parsed(comptime T: type) type {
@@ -33,7 +35,7 @@ pub fn http_get(allocator: std.mem.Allocator, client: *const curl.Easy, url: []c
         const urlZ: [:0]u8 = try allocator.allocSentinel(u8, url.len, 0);
         @memcpy(urlZ, url);
         defer allocator.free(urlZ);
-        break :rsp try client.get(urlZ);
+        break :rsp try wcurl.get(allocator, client, urlZ);
     };
     defer response.deinit();
     if (response.status_code < 200 or response.status_code >= 300) {
@@ -41,13 +43,6 @@ pub fn http_get(allocator: std.mem.Allocator, client: *const curl.Easy, url: []c
         return error.StatusCodeErr;
     }
 
-    // var arena = try allocator.create(ArenaAllocator);
-    // errdefer {
-    //     arena.deinit();
-    //     allocator.destroy(arena);
-    // }
-    // arena.* = ArenaAllocator.init(allocator);
-    // var arena_alloc = arena.allocator();
     const body_buffer = response.body orelse return error.NoBody;
     if (body_buffer.capacity == 0) {
         std.log.warn("NB: {d}", .{response.status_code});
@@ -73,7 +68,7 @@ pub fn http_post(allocator: std.mem.Allocator, client: *const curl.Easy, url: []
     };
     defer response.deinit();
     if (response.status_code < 200 or response.status_code >= 300) {
-        std.log.err("req failed with {d} for URL: {s}", .{ response.status_code, url });
+        std.log.err("POST failed with {d} for URL: {s}", .{ response.status_code, url });
         return error.StatusCodeErr;
     }
     const body_buffer = response.body orelse return error.NoBody;
@@ -100,54 +95,64 @@ const available_page_sizes = [_]u32{ 50, 20, 15, 10, 5, 3, 2 };
 //     .Debug => "http://127.0.0.1:8765/{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}",
 //     else => "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}",
 // };
-const template_url = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}";
+const template_url = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}&catalogId={d}";
 
 pub const ChangeWaitingParams = struct { catalog_id: u16, tld: []const u8, seed: usize, anonymizer: ?[]const u8 };
-pub const PunchParams = struct { catalog_id: u16, tld: []const u8, seed: usize, anonymizer: ?[]const u8 };
+pub const PunchParams = struct {
+    catalog_id: u16,
+    tld: []const u8,
+    seed: usize,
+    anonymizer: ?[]const u8,
+    iterations: u32 = 500,
+    sleep: u32 = 100,
+    proxyManager: ?proxy.ProxyManager = null,
+};
 
-pub fn check_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const ChangeWaitingParams, latest_total: *u32) !?u32 {
-    const seeded_page = config.seed;
-    const page_size = available_page_sizes[seeded_page % available_page_sizes.len];
-    const latest_page_possible: u16 = switch (config.catalog_id) {
-        161 => switch (page_size) { // 280 max
-            2 => 100,
-            3 => 15,
-            5 => 35,
-            10 => 27,
-            15 => 9,
-            20 => 7,
-            50 => 3,
-            else => 8,
-        },
-        48 => switch (page_size) {
-            2 => 300,
-            3 => 80,
-            5 => 100,
-            10 => 140,
-            15 => 100,
-            20 => 40,
-            50 => 20,
-            else => 100,
-        },
-        else => switch (page_size) {
-            2 => 950,
-            3 => 100,
-            5 => 300,
-            10 => 200,
-            15 => 100,
-            20 => 100,
-            50 => 40,
-            else => 100,
-        },
+const catalogPages = struct {
+    const delisting = page.Pages.init(&[_]page.Pages.PageDecl{
+        .{ .size = 2, .maxOffsetAvailable = 30 },
+        .{ .size = 3, .maxOffsetAvailable = 10 },
+        .{ .size = 5, .maxOffsetAvailable = 25 },
+        .{ .size = 10, .maxOffsetAvailable = 20 },
+        .{ .size = 15, .maxOffsetAvailable = 9 },
+        .{ .size = 20, .maxOffsetAvailable = 7 },
+        .{ .size = 50, .maxOffsetAvailable = 3 },
+    });
+    const listing = page.Pages.init(&[_]page.Pages.PageDecl{
+        .{ .size = 2, .maxOffsetAvailable = 30 },
+        .{ .size = 3, .maxOffsetAvailable = 30 },
+        .{ .size = 5, .maxOffsetAvailable = 20 },
+        .{ .size = 10, .maxOffsetAvailable = 30 },
+        .{ .size = 15, .maxOffsetAvailable = 20 },
+        .{ .size = 20, .maxOffsetAvailable = 20 },
+        .{ .size = 50, .maxOffsetAvailable = 10 },
+    });
+    const default = page.Pages.init(&[_]page.Pages.PageDecl{
+        .{ .size = 2, .maxOffsetAvailable = 100 },
+        .{ .size = 3, .maxOffsetAvailable = 20 },
+        .{ .size = 5, .maxOffsetAvailable = 30 },
+        .{ .size = 10, .maxOffsetAvailable = 27 },
+        .{ .size = 15, .maxOffsetAvailable = 9 },
+        .{ .size = 20, .maxOffsetAvailable = 7 },
+        .{ .size = 50, .maxOffsetAvailable = 3 },
+    });
+};
+
+pub fn fetch_total(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const ChangeWaitingParams) !u32 {
+    const catalogConfig = switch (config.catalog_id) {
+        161 => catalogPages.delisting,
+        48 => catalogPages.listing,
+        else => catalogPages.default,
     };
 
-    const page_num = (seeded_page % (latest_page_possible - 1)) + 1; // from 1 up to latest_page_possible
-    const catalog_str = try std.fmt.allocPrint(allocator, "{d}", .{config.catalog_id});
-    defer allocator.free(catalog_str);
-    const url = try std.fmt.allocPrint(allocator, template_url, .{ config.tld, page_num, page_size, catalog_str });
+    const queryPage = catalogConfig.atOffset(config.seed);
+    const zeroPrefix = std.math.pow(usize, 10, ((config.seed ^ config.seed >> 2) % 8) + 1);
+    const catalogStrDirty = try std.fmt.allocPrint(allocator, "{d}{d}", .{ zeroPrefix, config.catalog_id });
+    defer allocator.free(catalogStrDirty);
+    const catalogStr = catalogStrDirty[1..];
+    std.log.debug("Query page size {d} at offset {d} and catalog {s}", .{ queryPage.size, queryPage.offset, catalogStr });
+    const url = try std.fmt.allocPrint(allocator, template_url, .{ config.tld, queryPage.offset, queryPage.size, catalogStr, config.seed });
     defer allocator.free(url);
-    //std.base64.url_safe.Encoder.encode(, source: []const u8)
-    //.encode(encoder: *const Base64Encoder, dest: []u8, source: []const u8)
 
     const body = if (config.anonymizer) |anonymizer_addr|
         try http_post(allocator, easy, anonymizer_addr, url)
@@ -155,59 +160,41 @@ pub fn check_for_total_change(allocator: std.mem.Allocator, easy: *const curl.Ea
         try http_get(allocator, easy, url);
 
     defer allocator.free(body);
-    const new_total = extract_total(body) orelse {
-        std.log.err("NNF: {d}:{d},{d}: {s}", .{ config.catalog_id, page_size, page_num, body[0..@min(80, body.len)] });
+    const total = extract_total(body) orelse {
+        std.log.err("NNF: {d}:{d},{d}: {s}", .{ config.catalog_id, queryPage.size, queryPage.offset, body });
         return error.NeedleNotFound;
     };
-    std.log.debug("ID {d} for {s}", .{ new_total, url });
-    if (new_total > latest_total.*) {
-        const prev_total = latest_total.*;
-        latest_total.* = new_total;
-        if (prev_total != 0) {
-            return new_total;
-        }
-    }
-    return null;
+    return total;
 }
 
 pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const PunchParams, new_total: u32) !?[]const u8 {
-    for (1..400) |punch| {
-        loop: for (available_page_sizes) |size| {
-            const fetch_url = cid: {
-                const zero_pad = try repeatZ(allocator, "0", (punch + config.seed) % 300);
-                defer allocator.free(zero_pad);
-                const plus_pad = try repeatZ(allocator, "+", (punch + config.seed) % 3);
-                defer allocator.free(plus_pad);
-                const tweaked_catalog_id = try std.fmt.allocPrint(allocator, "{s}{s}{d}", .{ plus_pad, zero_pad, config.catalog_id });
-                defer allocator.free(tweaked_catalog_id);
-                break :cid try std.fmt.allocPrint(allocator, template_url, .{ config.tld, 1, size, tweaked_catalog_id });
-            };
+    const fetch_url = cid: {
+        const zero_pad = try repeatZ(allocator, "0", (config.seed ^ (config.seed >> 3)) % 14);
+        defer allocator.free(zero_pad);
+        const plus_pad = try repeatZ(allocator, "+", (config.seed ^ (config.seed >> 2)) % 3);
+        defer allocator.free(plus_pad);
+        const tweaked_catalog_id = try std.fmt.allocPrint(allocator, "{s}{s}{d}", .{ plus_pad, zero_pad, config.catalog_id });
+        defer allocator.free(tweaked_catalog_id);
+        break :cid try std.fmt.allocPrint(allocator, template_url, .{ config.tld, 1, 1, tweaked_catalog_id, config.seed });
+    };
 
-            defer allocator.free(fetch_url);
-            var time_spent_query = std.time.milliTimestamp();
-            const body_request = if (config.anonymizer) |anonymizer_addr|
-                http_post(allocator, easy, anonymizer_addr, fetch_url)
-            else
-                http_get(allocator, easy, fetch_url);
-            const body = body_request catch |erz| {
-                std.log.debug("Punch err {s}: attempt: {d} url: {s}", .{ @errorName(erz), punch, fetch_url });
-                continue :loop; // ignore errors;
-            };
-            const total = extract_total(body) orelse {
-                std.log.warn("NT {s}...", .{body[0..@min(80, body.len)]});
-                allocator.free(body);
-                continue :loop;
-            };
-            time_spent_query = std.time.milliTimestamp() - time_spent_query;
-            if (total >= new_total) {
-                return body;
-            } else {
-                allocator.free(body);
-            }
-            const sleep_remaning: u64 = @intCast(@max(0, 100 - time_spent_query)); // max 100 ms sleep
-            std.time.sleep(sleep_remaning * std.time.ns_per_ms);
-        }
-        std.time.sleep(std.time.ns_per_ms * 100);
+    defer allocator.free(fetch_url);
+    var time_spent_query = std.time.milliTimestamp();
+    const body_request = if (config.anonymizer) |anonymizer_addr|
+        http_post(allocator, easy, anonymizer_addr, fetch_url)
+    else
+        http_get(allocator, easy, fetch_url);
+    const body = try body_request;
+    const total = extract_total(body) orelse {
+        std.log.warn("NT {s}...", .{body[0..@min(200, body.len)]});
+        allocator.free(body);
+        return null;
+    };
+    time_spent_query = std.time.milliTimestamp() - time_spent_query;
+    if (total >= new_total) {
+        return body;
+    } else {
+        allocator.free(body);
     }
     return null;
 }
@@ -311,8 +298,8 @@ pub fn perform_timing_tests(allocator: std.mem.Allocator) !void {
 
     // const warmup = "https://www.binance.info/bapi/apex/v1/public/apex/cms/article/list/query";
     // const url_for_templating = "https://www.binance.info/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo={s}&pageSize=2&catalogId=161";
-    const page = "93";
-    const baselineURL = std.fmt.comptimePrint(url_for_templating, .{page});
+    const catalog = "93";
+    const baselineURL = std.fmt.comptimePrint(url_for_templating, .{catalog});
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
     var buffer: [18096]u8 = undefined;
@@ -320,7 +307,7 @@ pub fn perform_timing_tests(allocator: std.mem.Allocator) !void {
     for (1..300) |iteration| {
         const hack = try repeatZ(allocator, "0", iteration);
         defer allocator.free(hack);
-        const hexed = try std.mem.concat(allocator, u8, &[_][]const u8{ hack, page });
+        const hexed = try std.mem.concat(allocator, u8, &[_][]const u8{ hack, catalog });
         defer allocator.free(hexed);
         const headers = [_]http.Header{
             http.Header{ .name = "Origin", .value = hexed }, //

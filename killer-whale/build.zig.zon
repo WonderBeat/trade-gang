@@ -42,6 +42,10 @@
             .url = "https://github.com/karlseguin/mqttz/archive/3e43f007fee79daaaaa27fa99407b10f6e6bc694.tar.gz",
             .hash = "mqttz-0.0.0-ywFE_xXwAgBlpM_ArncPr0O8cPoDgDSmE8FLc3p5vOUT",
         },
+        .metrics = .{
+            .url = "https://github.com/karlseguin/metrics.zig/archive/2b584b6209871b7215706028988169599451dc0d.tar.gz",
+            .hash = "metrics-0.0.0-W7G4eCG0AQCQXidzvV5kx4l0smr_WCw-8JLIwS_OHYoW",
+        },
     },
     .paths = .{
         "build.zig",

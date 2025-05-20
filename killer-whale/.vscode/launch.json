@@ -67,6 +67,54 @@
           "ignoreFailures": true
         }
       ]
+    },
+    {
+      "name": "com remote proxy",
+      "type": "codelldb",
+      "request": "launch",
+      "program": "zig-out/bin/app",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "MOTHERSHIP": "127.0.0.1:8080",
+        "MQTT": "10.46.114.82",
+        "socks_proxy": "socks5://10.46.212.45:80",
+        "insecure": "true",
+        "CATALOG": "48",
+        "TLD": "me"
+      },
+      "environment": [
+        {
+          "name": "MQTT",
+          "value": "10.46.114.82"
+        },
+        {
+          "name": "MOTHERSHIP",
+          "value": "127.0.0.1:8080"
+        },
+        {
+          "name": "socks_proxy",
+          "value": "socks5://10.46.212.45:80"
+        },
+        {
+          "name": "CATALOG",
+          "value": "48"
+        },
+        {
+          "name": "TLD",
+          "value": "me"
+        }
+      ],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
     }
   ]
 }

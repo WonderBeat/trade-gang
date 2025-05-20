@@ -55,7 +55,7 @@ pub const Mqtt = struct {
     }
 
     pub fn send(self: *Self, topic: []const u8, text: []const u8) !?u16 {
-        return try self.client.publish(.{ .timeout = 200, .retries = 2 }, .{ .topic = topic, .message = text, .content_type = "text", .message_expiry_interval = 15 });
+        return try self.client.publish(.{ .timeout = 133, .retries = 1 }, .{ .topic = topic, .message = text, .content_type = "text", .message_expiry_interval = 15 });
     }
 
     pub fn ping(self: *Self) !void {

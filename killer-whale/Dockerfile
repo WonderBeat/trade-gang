@@ -31,7 +31,8 @@ COPY src ./src/
 RUN ./build.sh "$TARGETPLATFORM" "/application"
 
 FROM alpine:3.21.3
-RUN apk add curl-dev
+RUN apk add curl-dev socat
+COPY nc-web.sh /
 COPY --from=0 /application/bin/app /app
 
 CMD ["/app"]

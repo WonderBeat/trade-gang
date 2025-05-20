@@ -10,8 +10,10 @@ const messaging = @import("messaging.zig");
 const mqtt = @import("mqtt.zig");
 const parse = @import("parsers.zig");
 const wcurl = @import("curl.zig");
+const prometheus = @import("prometheus.zig");
+const proxy = @import("proxy-manager.zig");
 
-const BINANME_TOPIC = if (builtin.mode == .Debug) "binance-test" else "binance";
+const BINANCE_TOPIC = if (builtin.mode == .Debug) "binance-test" else "binance";
 
 //const yaml = @import("ymlz");
 //const zeit = @import("zeit");
@@ -39,6 +41,9 @@ pub fn main() !void {
             .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
         };
     };
+    if (!is_debug) {
+        try prometheus.initializeMetrics(.{ .prefix = "killa_" });
+    }
 
     defer if (is_debug) {
         _ = debug_allocator.deinit();
@@ -106,6 +111,7 @@ pub fn main() !void {
 
     const catalog = try std.fmt.parseInt(u16, std.posix.getenv("CATALOG") orelse "93", 0);
     const tld = std.posix.getenv("TLD") orelse "com";
+
     const send_announce_address = try resolve_address(std.posix.getenv("MOTHERSHIP") orelse {
         std.log.err("Mothership address required", .{});
         return;
@@ -116,26 +122,31 @@ pub fn main() !void {
         return;
     };
 
-    const iterations = if (is_debug) 10 else 100;
     var prng = std.Random.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
         try std.posix.getrandom(std.mem.asBytes(&seed));
         break :blk seed;
     });
 
-    var latestTotal: u32 = 0;
+    var latest_total: u32 = 0;
     const curl_module = try wcurl.Curl.init(allocator);
     defer curl_module.deinit();
     const client = try mqtt.Mqtt.init(allocator, mqtt_address);
-    _ = try client.subscribe(BINANME_TOPIC);
+    _ = try client.subscribe(BINANCE_TOPIC);
     defer {
         client.deinit();
     }
     const easy = curl_module.easy;
+    if (anonymizer == null) {
+        if (std.posix.getenv("FETCH_URL")) |url| {
+            curl_module.setProxyDownloadUrl(url);
+            try curl_module.exchangeProxy();
+        }
+    }
 
     if (std.posix.getenv("PASSIVE")) |_| {
         std.log.info("Passive mode ON: mothership {}, mqtt {s}", .{ send_announce_address, mqtt_address });
-        for (0..1000) |_| {
+        for (0..1111) |_| {
             if (try passive_punch_mode(allocator, client, curl_module, 14000, anonymizer, 1, send_announce_address, null)) |_| {
                 std.time.sleep(std.time.ns_per_s * 30); // cooldown
                 return;
@@ -144,33 +155,61 @@ pub fn main() !void {
         }
         return;
     }
-
     std.log.debug("Catalog {d} home address {}", .{ catalog, send_announce_address });
+    const iterations = if (is_debug) 3 else 25;
     for (0..iterations) |_| {
-        const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 10000);
-        try curl_module.set_trim_body(100, 300);
+        const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 999999);
+        try curl_module.set_trim_body(0, 333);
         const result: ?u32 = found: {
             var config = bin.ChangeWaitingParams{ .catalog_id = catalog, .tld = tld, .seed = seed, .anonymizer = anonymizer };
-            for (1..100) |iter| {
+            for (1..iterations) |iter| {
+                prometheus.latest(latest_total);
                 var time_spent_query = std.time.milliTimestamp();
                 config.seed = seed + iter;
-                const maybe_change = bin.check_for_total_change(allocator, &easy, &config, &latestTotal) catch |errz| none: {
-                    std.log.err("fail {d}: {s}", .{ latestTotal, @errorName(errz) });
-                    break :none null;
+                const fetched_total = bin.fetch_total(allocator, &easy, &config) catch |errz| none: {
+                    const time_spent_err = std.time.milliTimestamp() - time_spent_query;
+                    std.log.err("F {d}: {s} with {?s} in {d}ms", .{ latest_total, @errorName(errz), curl_module.proxyManager.getCurrentProxy(), time_spent_err });
+                    prometheus.err();
+                    if (errz == wcurl.CurlError.OperationTimedout) {
+                        prometheus.timeout();
+                    } else if (errz == wcurl.CurlError.SSLConnectError or errz == wcurl.CurlError.SSLCertProblem) {
+                        prometheus.sslError();
+                    }
+                    break :none 0;
                 };
-                if (iter % 3 == 0) {
+                const success = fetched_total > 0;
+                time_spent_query = std.time.milliTimestamp() - time_spent_query;
+                if (success) {
+                    prometheus.hit();
+                    if (curl_module.latest_query_metrics()) |metrics| {
+                        const execution_time_ms = metrics.total_time - metrics.pretransfer_time;
+                        std.log.debug("execution time {d} ({d} - {d})", .{ execution_time_ms, metrics.total_time, metrics.pretransfer_time });
+                        prometheus.latency(@intCast(execution_time_ms));
+                    }
+                    try curl_module.exchangeProxy();
+                } else {
+                    if (try curl_module.dropCurrentProxy() == 0) {
+                        try curl_module.exchangeProxy();
+                    }
+                }
+                if (fetched_total > latest_total) {
+                    if (latest_total != 0) {
+                        break :found fetched_total;
+                    }
+                    latest_total = fetched_total;
+                }
+                if (iter % 5 == 0) {
                     try client.ping();
                 }
-                if (maybe_change) |change| {
-                    send_mqtt_alert(client, catalog, change, parse.Tld.from_string(tld).?) catch |errz| {
-                        std.log.warn("Mqtt send error {s}", .{@errorName(errz)});
-                    };
-                    break :found change;
+                if (iter % 13 == 0) {
+                    std.log.info("latest total {d}", .{latest_total});
+                    const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
+                    defer file.close();
+                    try prometheus.writeMetrics(file.writer());
                 }
-                time_spent_query = std.time.milliTimestamp() - time_spent_query;
-                const sleep_remaning: i32 = @intCast(@max(50, (6 * std.time.ms_per_s) - time_spent_query)); // min 50ms sleep, max 6s
+                const sleep_max_ms: i32 = if (success) 1500 else 200;
+                const sleep_remaning: i32 = @intCast(@max(100, sleep_max_ms - time_spent_query)); // min 50ms sleep
 
-                std.log.debug("spleeping for {d}ms", .{sleep_remaning});
                 if (try passive_punch_mode(
                     allocator,
                     client,
@@ -182,7 +221,7 @@ pub fn main() !void {
                     parse.Tld.from_string(tld).?,
                 )) |update| {
                     if (update.catalog == catalog) {
-                        latestTotal = update.total;
+                        latest_total = update.total;
                     }
                     try client.ping();
                     std.time.sleep(std.time.ns_per_s * 15); // cooldown
@@ -194,20 +233,37 @@ pub fn main() !void {
 
         if (result) |new_total| {
             std.log.info("Catalog update signal {d}", .{new_total});
-            const config = bin.PunchParams{ .catalog_id = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed };
+            send_mqtt_alert(client, catalog, new_total, parse.Tld.from_string(tld).?) catch |errz| {
+                std.log.warn("Mqtt send error {s}", .{@errorName(errz)});
+            };
+            var config = bin.PunchParams{ .catalog_id = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed };
             try punch_notify(allocator, curl_module, send_announce_address, &config, new_total);
-            latestTotal = new_total;
+            latest_total = new_total;
         }
 
         try client.ping();
         std.time.sleep(std.time.ns_per_s * 1);
     }
+    if (latest_total == 0) { // we have nothing to hunt for
+        return;
+    }
+    std.log.info("Bruteforce something after {d}", .{latest_total});
+    const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 999999);
+    var config = bin.PunchParams{
+        .catalog_id = catalog,
+        .tld = tld,
+        .anonymizer = anonymizer,
+        .seed = seed,
+        .sleep = 1500,
+        .iterations = if (is_debug) 5 else 500,
+    };
+    try punch_notify(allocator, curl_module, send_announce_address, &config, latest_total + 1);
 }
 
 fn send_mqtt_alert(cli: *mqtt.Mqtt, catalog: u16, total: u32, tld: parse.Tld) !void {
     var buf: [30:0]u8 = undefined;
     const mqttMsg = try std.fmt.bufPrint(&buf, "{d}|{d}|{s}", .{ catalog, total, tld.to_string() });
-    _ = try cli.send(BINANME_TOPIC, mqttMsg);
+    _ = try cli.send(BINANCE_TOPIC, mqttMsg);
 }
 
 fn passive_punch_mode(
@@ -223,8 +279,19 @@ fn passive_punch_mode(
     if (try wait_for_message(allocator, mqtt_cli, timeout)) |alert| {
         const alert_tld = (overwrite_tld orelse alert.tld).to_string();
         std.log.info("Cooperative punching activated {d}:{d}:{s}", .{ alert.catalog, alert.total, alert_tld });
-        const conf = bin.PunchParams{ .catalog_id = alert.catalog, .tld = alert_tld, .seed = seed, .anonymizer = anonymizer };
-        _ = try punch_notify(allocator, curl_cli, send_announce_address, &conf, alert.total);
+        var conf = bin.PunchParams{
+            .catalog_id = alert.catalog,
+            .tld = alert_tld,
+            .seed = seed,
+            .anonymizer = anonymizer,
+        };
+        _ = try punch_notify(
+            allocator,
+            curl_cli,
+            send_announce_address,
+            &conf,
+            alert.total,
+        );
         return .{ .catalog = alert.catalog, .total = alert.total };
     }
     return null;
@@ -246,10 +313,39 @@ fn wait_for_message(
     return null;
 }
 
-fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *const bin.PunchParams, new_total: u32) !void {
-    try curl_cli.set_trim_body(50, 3000);
+fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *bin.PunchParams, new_total: u32) !void {
+    try curl_cli.set_trim_body(0, 2000);
     const easy = curl_cli.easy;
-    const maybe_update = try bin.punch_announce_update(allocator, &easy, config, new_total);
+    var maybe_update: ?[]const u8 = null;
+    const startSeed = config.seed;
+    for (0..config.iterations) |iter| {
+        try curl_cli.exchangeProxy();
+        var time_spent_query = std.time.milliTimestamp();
+
+        config.seed = startSeed + iter;
+        var is_success = true;
+        maybe_update = bin.punch_announce_update(allocator, &easy, config, new_total) catch |errz| not_found: {
+            std.log.debug("PErr with {?s} {s}", .{ curl_cli.proxyManager.getCurrentProxy(), @errorName(errz) });
+            _ = try curl_cli.dropCurrentProxy();
+            prometheus.err();
+            is_success = false;
+            break :not_found null;
+        };
+        if (is_success) {
+            prometheus.hit();
+            if (curl_cli.latest_query_metrics()) |metrics| {
+                const execution_time_ms = metrics.total_time - metrics.pretransfer_time;
+                std.log.debug("execution time {d} ({d} - {d})", .{ execution_time_ms, metrics.total_time, metrics.pretransfer_time });
+                prometheus.latency(@intCast(execution_time_ms));
+            }
+        }
+        if (maybe_update != null) {
+            break;
+        }
+        time_spent_query = std.time.milliTimestamp() - time_spent_query;
+        const sleep_remaning: u64 = @intCast(@max(50, config.sleep - time_spent_query));
+        std.time.sleep(sleep_remaning * std.time.ns_per_ms);
+    }
     if (maybe_update) |update| no_update: {
         defer allocator.free(update);
         const updated_id = bin.extract_total(update) orelse {

@@ -1,0 +1,39 @@
+commands:
+  - id: deploy
+    composite:
+      commands:
+        - build-image
+      group:
+        isDefault: true
+        kind: deploy
+  - id: build-image
+    apply:
+      component: kaniko
+  - exec:
+      commandLine: zig build
+      component: zig-toolchain
+      group:
+        isDefault: true
+        kind: run
+      hotReloadCapable: false
+      workingDir: ${PROJECT_SOURCE}
+    id: build
+
+components:
+  # - container:
+  #     image: stagex/zig:0.13.0
+  #     #image: quay.io/devfile/universal-developer-image:ubi8-latest
+  #     memoryLimit: 90Mi
+  #     command: ["/bin/sh", "-c", "sleep 1d"]
+  #     memoryRequest: 30Mi
+  #     mountSources: true
+  #   name: zig-toolchain
+
+  # - name: outerloop-build
+  #   image:
+  #     dockerfile:
+  #       buildContext: ${PROJECT_SOURCE}
+  #       rootRequired: false
+  #       uri: ./Dockerfile
+  #     imageName: "bi-crawler"
+schemaVersion: 2.2.0
