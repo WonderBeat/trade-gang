@@ -44,6 +44,10 @@ async def cloudflare_scrape(request):
         return web.Response(text="Async err", content_type="text", status=500)
     body = response.text
     status = response.status_code
+    resp_headers = {}
+    for header, value in response.headers.items():
+        if "length" not in value.lower():
+            resp_headers[header] = value
     response.close()
     global success_req_count
     global error_count
@@ -54,7 +58,7 @@ async def cloudflare_scrape(request):
         success_req_count += 1
     if success_req_count > 10 and success_req_count % 47 == 0:
         logger.info(f"{success_req_count} successfull requests")
-    return web.Response(text=body, content_type="application/json", status=status)
+    return web.Response(text=body, status=status, headers=resp_headers)
 
 
 async def register_err(misbehaving_scraper):

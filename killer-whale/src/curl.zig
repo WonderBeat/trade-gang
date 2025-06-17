@@ -19,7 +19,7 @@ pub const Curl = struct {
         errdefer ca_bundle.deinit();
         //const hostname = std.posix.getenv("HOSTNAME") orelse "UNDEF";
         const easy = try curl.Easy.init(allocator, .{
-            .default_user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10) Gecko/20100101 Firefox/135.0", //
+            .default_user_agent = "Mozilla/5.0 Firefox/135.0", //
             .ca_bundle = ca_bundle,
             .default_timeout_ms = 3_100,
         });
@@ -74,20 +74,16 @@ pub const Curl = struct {
         const headers = blk: {
             var h = try self.easy.createHeaders();
             errdefer h.deinit();
-            //try h.add("Origin", "www.binance.com");
+            try h.add("Host", "www.binance.com:@31337");
             try h.add("Accept", "*/*");
-            try h.add("Proxy-Connection", "keep-alive");
-            try h.add("Keep-Alive", "300");
-            //try h.add("Connection", "close");
-            //try h.add("User-Agent", "Firefox/135.0");
-            //try h.add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:135.0) Gecko/20100101 Firefox/135.0");
-            try h.add("Accep-Language", "en-US,en;q=0.5");
+            //try h.add("Proxy-Connection", "keep-alive");
+            //try h.add("lang", "en");
+            //try h.add("Accep-Language", "en-US,en;q=0.5");
             if (trim_to > 0) {
                 var buf: [20]u8 = undefined;
                 const size_str = try std.fmt.bufPrint(&buf, "bytes={d}-{d}", .{ trim_from, trim_to });
                 try h.add("Range", size_str);
             }
-            //try h.add("User-Agent", user_agent);
             break :blk h;
         };
         errdefer headers.deinit();
@@ -107,8 +103,8 @@ pub const Curl = struct {
     }
 
     pub fn dropCurrentProxy(self: *Self) !usize {
-        self.proxyManager.dropCurrent();
         if (!self.proxyManager.isEmpty()) {
+            self.proxyManager.dropCurrent();
             if (self.proxyManager.getCurrentProxy()) |url| {
                 try self.set_proxy(url);
             }
@@ -119,7 +115,10 @@ pub const Curl = struct {
     pub fn exchangeProxy(self: *Self) !void {
         if (self.proxyManager.size() < 5) {
             if (self.proxyDownloadUrl) |url| {
-                try self.proxyManager.loadFromUrl(url);
+                const loadedCount = try self.proxyManager.loadFromUrl(url);
+                if (loadedCount == 0) {
+                    return error.ProxyLoadError;
+                }
                 std.log.debug("{d} proxies loaded", .{self.proxyManager.size()});
             }
         }

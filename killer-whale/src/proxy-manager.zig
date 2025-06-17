@@ -33,18 +33,16 @@ pub const ProxyManager = struct {
         self.proxies.clearAndFree();
     }
 
-    pub fn loadFromFile(self: *ProxyManager, file_path: []const u8) !void {
-        self.clear();
+    pub fn loadFromFile(self: *ProxyManager, file_path: []const u8) !usize {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
         var buf_reader = std.io.bufferedReader(file.reader());
         const reader = buf_reader.reader();
-        try self.loadFromReader(&reader);
+        return try self.loadFromReader(&reader);
     }
 
-    pub fn loadFromUrl(self: *ProxyManager, url: [:0]const u8) !void {
-        self.clear();
+    pub fn loadFromUrl(self: *ProxyManager, url: [:0]const u8) !usize {
         const ca_bundle = try curl.allocCABundle(self.allocator);
         defer ca_bundle.deinit();
         const easy = try curl.Easy.init(self.allocator, .{
@@ -52,20 +50,24 @@ pub const ProxyManager = struct {
             .default_timeout_ms = 2000,
         });
         defer easy.deinit();
-        const response = try easy.get(url);
+        const response = easy.get(url) catch |errz| {
+            std.log.err("Failed to get proxy list from url: {s}", .{url});
+            return errz;
+        };
         defer response.deinit();
         const body_buffer = response.body orelse return error.NoBody;
         var stream = std.io.fixedBufferStream(body_buffer.items);
-        try self.loadFromReader(&stream.reader());
+        return try self.loadFromReader(&stream.reader());
     }
 
-    pub fn loadFromReader(self: *ProxyManager, reader: anytype) !void {
+    pub fn loadFromReader(self: *ProxyManager, reader: anytype) !usize {
         var buffer: [100]u8 = undefined;
         while (try reader.readUntilDelimiterOrEof(&buffer, '\n')) |line| {
             if (line.len == 0) continue;
             const zeroTermitaned = try std.fmt.allocPrintZ(self.allocator, "{s}", .{line});
             try self.proxies.append(zeroTermitaned);
         }
+        return self.proxies.items.len;
     }
 
     pub fn size(self: *ProxyManager) usize {
@@ -163,7 +165,7 @@ test "ProxyManager getCurrentProxy" {
     var pm = ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
-    try testing.expect(null, pm.getCurrentProxy());
+    try testing.expect(pm.getCurrentProxy() == null);
 
     const proxy1 = try testing.allocator.dupeZ(u8, "http://localhost:8080");
     const proxy2 = try testing.allocator.dupeZ(u8, "http://localhost:8081");
@@ -171,7 +173,7 @@ test "ProxyManager getCurrentProxy" {
     try pm.proxies.append(proxy2);
 
     _ = pm.getNextProxy().?; // Advance to proxy2
-    try testing.expectEqualStrings("http://localhost:8081", pm.getCurrentProxy());
+    try testing.expectEqualStrings("http://localhost:8081", pm.getCurrentProxy().?);
 }
 
 test "ProxyManager dropCurrent" {
@@ -189,12 +191,12 @@ test "ProxyManager dropCurrent" {
     try pm.proxies.append(proxy3);
 
     _ = pm.getNextProxy().?; // Advance to proxy2
-    try testing.expectEqualStrings("http://localhost:8081", pm.getCurrentProxy());
+    try testing.expectEqualStrings("http://localhost:8081", pm.getCurrentProxy().?);
 
     pm.dropCurrent(); // Drop proxy2
 
     try testing.expectEqual(@as(usize, 2), pm.size());
-    try testing.expectEqualStrings("http://localhost:8082", pm.getCurrentProxy());
+    try testing.expectEqualStrings("http://localhost:8082", pm.getCurrentProxy().?);
 }
 
 test "ProxyManager loadFromFile" {
@@ -217,7 +219,7 @@ test "ProxyManager loadFromFile" {
     file.close();
 
     // Test loadFromFile
-    try pm.loadFromFile(test_file_path);
+    _ = try pm.loadFromFile(test_file_path);
 
     try testing.expectEqual(@as(usize, 3), pm.size());
     try testing.expectEqualStrings("http://localhost:8080", pm.proxies.items[0]);

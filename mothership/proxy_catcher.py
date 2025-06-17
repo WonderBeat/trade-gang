@@ -109,6 +109,7 @@ def custom_proxies():
     return [
         "socks5://10.88.101.13:1080",  # nasduck
         "socks5://10.88.101.77:1080",  # montenegro
+        "socks5://10.88.101.101:1080",  # sofia
     ]
 
 
@@ -231,7 +232,6 @@ async def download_proxies():
     random.shuffle(new_proxies)
     start_time = time.time()
     timeout_seconds = 500
-    proxies_size_before = len(proxies)
     proxies.extend(self_managed_proxies)
     for chunk in chunk_list(new_proxies, 100):
         elapsed_time = time.time() - start_time
@@ -239,12 +239,10 @@ async def download_proxies():
             break
         chunk_working_proxies = await filter_working_proxies(chunk, 3)
         proxies.extend(chunk_working_proxies)
-        if (
-            proxies_size_before > 0 and len(proxies) > proxies_size_before + 30
-        ):  # trim on update
-            proxies = proxies[proxies_size_before:]
-            proxies_size_before = 0
+        proxies = list(dict.fromkeys(proxies))
 
+    if len(proxies) > 200:
+        proxies = proxies[:200]
     last_updated = time.time()
     PROXY_COUNT.set(len(proxies))
     LAST_UPDATE_TIMESTAMP.set(last_updated)

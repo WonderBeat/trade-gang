@@ -80,7 +80,7 @@ pub fn main() !void {
             std.log.debug("Msg sent {d} bytes", .{bytes_sent});
             return;
         } else if (matches.subcommandMatches("punch")) |punch_cmd| {
-            const id = punch_cmd.getSingleValue("id") orelse return;
+            //const id = punch_cmd.getSingleValue("id") orelse return;
             const address = punch_cmd.getSingleValue("anonymizer") orelse null;
             const tld = punch_cmd.getSingleValue("tld") orelse "me";
             const catalog = try std.fmt.parseInt(u16, punch_cmd.getSingleValue("catalog") orelse return, 0);
@@ -88,11 +88,16 @@ pub fn main() !void {
             defer curl_module.deinit();
             const easy = curl_module.easy;
 
-            const config = bin.PunchParams{ .catalog_id = catalog, .tld = tld, .seed = 1, .anonymizer = address };
-            const update = try bin.punch_announce_update(allocator, &easy, &config, try std.fmt.parseInt(u32, id, 0));
+            const config = bin.FetchSingleParams{
+                .catalogId = catalog,
+                .tld = tld,
+                .seed = 1,
+                .anonymizer = address,
+            };
+            const update = try bin.fetchPage(allocator, &easy, &config);
             if (update) |result| {
-                std.log.info("Punched with result {s}...", .{result[0..300]});
-                allocator.free(result);
+                std.log.info("Punched with result {s}...", .{result.body[0..300]});
+                result.clear(allocator);
             }
             return;
         } else if (matches.subcommandMatches("avalance")) |avalance_cmd| {
@@ -155,18 +160,25 @@ pub fn main() !void {
         }
         return;
     }
-    std.log.debug("Catalog {d} home address {}", .{ catalog, send_announce_address });
-    const iterations = if (is_debug) 3 else 25;
+    const iterations = if (is_debug) 3 else (20 + prng.random().intRangeAtMost(usize, 0, 30));
+    const catalogConfig = switch (catalog) {
+        161 => bin.catalogPages.delisting,
+        48 => bin.catalogPages.listing,
+        else => bin.catalogPages.default,
+    };
     for (0..iterations) |_| {
         const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 999999);
-        try curl_module.set_trim_body(0, 333);
+        try curl_module.set_trim_body(0, 400);
         const result: ?u32 = found: {
-            var config = bin.ChangeWaitingParams{ .catalog_id = catalog, .tld = tld, .seed = seed, .anonymizer = anonymizer };
+            //var config = bin.ChangeWaitingParams{ .catalog_id = catalog, .tld = tld, .seed = seed, .anonymizer = anonymizer };
+
+            var config = bin.FetchSingleParams{ .catalogId = catalog, .tld = tld, .seed = seed, .anonymizer = anonymizer };
             for (1..iterations) |iter| {
                 prometheus.latest(latest_total);
                 var time_spent_query = std.time.milliTimestamp();
                 config.seed = seed + iter;
-                const fetched_total = bin.fetch_total(allocator, &easy, &config) catch |errz| none: {
+                config.page = catalogConfig.atOffset(config.seed);
+                const fetchResult = bin.fetchPage(allocator, &easy, &config) catch |errz| none: {
                     const time_spent_err = std.time.milliTimestamp() - time_spent_query;
                     std.log.err("F {d}: {s} with {?s} in {d}ms", .{ latest_total, @errorName(errz), curl_module.proxyManager.getCurrentProxy(), time_spent_err });
                     prometheus.err();
@@ -175,15 +187,14 @@ pub fn main() !void {
                     } else if (errz == wcurl.CurlError.SSLConnectError or errz == wcurl.CurlError.SSLCertProblem) {
                         prometheus.sslError();
                     }
-                    break :none 0;
+                    break :none null;
                 };
-                const success = fetched_total > 0;
+                const success = fetchResult != null;
                 time_spent_query = std.time.milliTimestamp() - time_spent_query;
                 if (success) {
                     prometheus.hit();
                     if (curl_module.latest_query_metrics()) |metrics| {
                         const execution_time_ms = metrics.total_time - metrics.pretransfer_time;
-                        std.log.debug("execution time {d} ({d} - {d})", .{ execution_time_ms, metrics.total_time, metrics.pretransfer_time });
                         prometheus.latency(@intCast(execution_time_ms));
                     }
                     try curl_module.exchangeProxy();
@@ -192,11 +203,30 @@ pub fn main() !void {
                         try curl_module.exchangeProxy();
                     }
                 }
-                if (fetched_total > latest_total) {
-                    if (latest_total != 0) {
-                        break :found fetched_total;
+                if (fetchResult) |fetched| {
+                    defer fetched.clear(allocator);
+                    if (fetched.extractTotal()) |fetched_total| {
+                        if (fetched_total > latest_total) {
+                            if (latest_total != 0) {
+                                std.log.info("Catalog update signal {d}, for {s} / {?s}", .{ fetched_total, fetched.url, curl_module.proxyManager.getCurrentProxy() });
+                                for (0..5) |nextPageIndex| {
+                                    config.page = catalogConfig.atOffset(config.seed + nextPageIndex);
+                                    const nextPage = bin.fetchPage(allocator, &easy, &config) catch null;
+                                    if (nextPage) |np| {
+                                        defer np.clear(allocator);
+                                        std.log.debug("Next page total: {?d} for {s} / {?s}", .{ np.extractTotal(), np.url, curl_module.proxyManager.getCurrentProxy() });
+                                    } else {
+                                        try curl_module.exchangeProxy();
+                                    }
+                                }
+                                break :found fetched_total;
+                            }
+                            latest_total = fetched_total;
+                            std.log.debug("Total set to {d}", .{fetched_total});
+                        }
+                    } else {
+                        std.log.err("Catalog update total not found {s}", .{fetched.body});
                     }
-                    latest_total = fetched_total;
                 }
                 if (iter % 5 == 0) {
                     try client.ping();
@@ -232,12 +262,14 @@ pub fn main() !void {
         };
 
         if (result) |new_total| {
-            std.log.info("Catalog update signal {d}", .{new_total});
             send_mqtt_alert(client, catalog, new_total, parse.Tld.from_string(tld).?) catch |errz| {
                 std.log.warn("Mqtt send error {s}", .{@errorName(errz)});
             };
-            var config = bin.PunchParams{ .catalog_id = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed };
-            try punch_notify(allocator, curl_module, send_announce_address, &config, new_total);
+            const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed, .lastSeenTotal = new_total };
+            const success = try punch_notify(allocator, curl_module, send_announce_address, &config);
+            if (success) {
+                std.log.info("Update found as a result of a signal with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
+            }
             latest_total = new_total;
         }
 
@@ -249,15 +281,11 @@ pub fn main() !void {
     }
     std.log.info("Bruteforce something after {d}", .{latest_total});
     const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 999999);
-    var config = bin.PunchParams{
-        .catalog_id = catalog,
-        .tld = tld,
-        .anonymizer = anonymizer,
-        .seed = seed,
-        .sleep = 1500,
-        .iterations = if (is_debug) 5 else 500,
-    };
-    try punch_notify(allocator, curl_module, send_announce_address, &config, latest_total + 1);
+    const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed, .sleep = 1200, .iterations = if (is_debug) 5 else @intCast(40 + seed % 20), .lastSeenTotal = latest_total };
+    const success = try punch_notify(allocator, curl_module, send_announce_address, &config);
+    if (success) {
+        std.log.info("Update was found with bruteforce with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
+    }
 }
 
 fn send_mqtt_alert(cli: *mqtt.Mqtt, catalog: u16, total: u32, tld: parse.Tld) !void {
@@ -279,18 +307,18 @@ fn passive_punch_mode(
     if (try wait_for_message(allocator, mqtt_cli, timeout)) |alert| {
         const alert_tld = (overwrite_tld orelse alert.tld).to_string();
         std.log.info("Cooperative punching activated {d}:{d}:{s}", .{ alert.catalog, alert.total, alert_tld });
-        var conf = bin.PunchParams{
-            .catalog_id = alert.catalog,
+        const conf = PunchParams{
+            .catalogId = alert.catalog,
             .tld = alert_tld,
             .seed = seed,
             .anonymizer = anonymizer,
+            .lastSeenTotal = alert.total,
         };
         _ = try punch_notify(
             allocator,
             curl_cli,
             send_announce_address,
             &conf,
-            alert.total,
         );
         return .{ .catalog = alert.catalog, .total = alert.total };
     }
@@ -313,48 +341,75 @@ fn wait_for_message(
     return null;
 }
 
-fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *bin.PunchParams, new_total: u32) !void {
-    try curl_cli.set_trim_body(0, 2000);
+const PunchParams = struct {
+    catalogId: u16,
+    tld: []const u8,
+    seed: usize,
+    anonymizer: ?[]const u8,
+    iterations: u32 = 500,
+    sleep: u32 = 100,
+    lastSeenTotal: u32,
+    proxyManager: ?proxy.ProxyManager = null,
+};
+
+fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *const PunchParams) !bool {
+    try curl_cli.set_trim_body(0, 0);
     const easy = curl_cli.easy;
-    var maybe_update: ?[]const u8 = null;
-    const startSeed = config.seed;
+    var fetch_params = bin.FetchSingleParams{
+        .catalogId = config.catalogId,
+        .tld = config.tld,
+        .seed = config.seed,
+        .anonymizer = config.anonymizer,
+    };
+    const startSeed = fetch_params.seed;
+    var maybe_update: ?bin.FetchResult = null;
     for (0..config.iterations) |iter| {
-        try curl_cli.exchangeProxy();
         var time_spent_query = std.time.milliTimestamp();
 
-        config.seed = startSeed + iter;
-        var is_success = true;
-        maybe_update = bin.punch_announce_update(allocator, &easy, config, new_total) catch |errz| not_found: {
+        fetch_params.seed = startSeed + iter;
+        const pageSize: u16 = if ((fetch_params.seed ^ (config.seed << 2)) % 100 > 50) 50 else 10;
+        fetch_params.page.size = pageSize;
+        const result = bin.fetchPage(allocator, &easy, &fetch_params) catch |errz| not_found: {
             std.log.debug("PErr with {?s} {s}", .{ curl_cli.proxyManager.getCurrentProxy(), @errorName(errz) });
             _ = try curl_cli.dropCurrentProxy();
             prometheus.err();
-            is_success = false;
             break :not_found null;
         };
-        if (is_success) {
-            prometheus.hit();
-            if (curl_cli.latest_query_metrics()) |metrics| {
-                const execution_time_ms = metrics.total_time - metrics.pretransfer_time;
-                std.log.debug("execution time {d} ({d} - {d})", .{ execution_time_ms, metrics.total_time, metrics.pretransfer_time });
-                prometheus.latency(@intCast(execution_time_ms));
+        if (result) |data| {
+            defer data.clear(allocator);
+            if (data.extractTotal()) |total| {
+                prometheus.hit();
+                if (curl_cli.latest_query_metrics()) |metrics| {
+                    const execution_time_ms = metrics.total_time - metrics.pretransfer_time;
+                    prometheus.latency(@intCast(execution_time_ms));
+                }
+                if (total > config.lastSeenTotal) {
+                    std.log.info("Punch success 🚀 {d}: {s}", .{ total, data.url });
+                    maybe_update = data;
+                    break;
+                }
+            } else {
+                std.log.err("Total not found: {s}", .{data.body});
             }
         }
-        if (maybe_update != null) {
-            break;
+        if (iter % 13 == 0) {
+            const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
+            defer file.close();
+            try prometheus.writeMetrics(file.writer());
         }
+        try curl_cli.exchangeProxy();
         time_spent_query = std.time.milliTimestamp() - time_spent_query;
         const sleep_remaning: u64 = @intCast(@max(50, config.sleep - time_spent_query));
         std.time.sleep(sleep_remaning * std.time.ns_per_ms);
     }
     if (maybe_update) |update| no_update: {
-        defer allocator.free(update);
-        const updated_id = bin.extract_total(update) orelse {
-            std.log.warn("No total in update {s}", .{update});
+        defer update.clear(allocator);
+        const updated_id = update.extractTotal() orelse {
+            std.log.warn("No total in update {s}", .{update.url});
             break :no_update;
         };
-        std.log.info("Punch success 🚀 {d}: {s}", .{ updated_id, update });
-        const announce = parse.extract_announce_content(update) orelse {
-            std.log.warn("Mailformed announce {s}", .{update});
+        const announce = parse.extract_announce_content(update.body) orelse {
+            std.log.warn("Mailformed announce {s}", .{update.url});
             break :no_update;
         };
         if (announce.title.len < 5 or announce.ts < 1000) {
@@ -370,17 +425,16 @@ fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_ur
             std.log.warn("No coins found {d} {s}", .{ announce.id, announce.title });
             break :no_update;
         }
-        const bytes_count = messaging.send_announce(allocator, announce_url, &coins, announce.ts, config.catalog_id, &announce.title, is_important) catch 0;
+        const bytes_count = messaging.send_announce(allocator, announce_url, &coins, announce.ts, config.catalogId, &announce.title, is_important) catch 0;
         std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ updated_id, bytes_count });
         if (is_important) {
             std.log.info("🔴 Call to action sent", .{});
-            std.time.sleep(std.time.ns_per_s * std.time.s_per_hour * 1); // nothing to do here
+            std.time.sleep(std.time.ns_per_s * if (builtin.mode == .Debug) 1 else std.time.s_per_hour); // nothing to do here
         } else {
             std.time.sleep(std.time.ns_per_s * std.time.s_per_min * 1);
         }
-    } else {
-        std.log.err("Punching was not successfull: {d}", .{new_total});
     }
+    return maybe_update != null;
 }
 
 fn resolve_address(address_with_port: []const u8) !std.net.Address {

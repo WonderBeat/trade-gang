@@ -12,24 +12,6 @@ const messaging = @import("messaging.zig");
 const page = @import("page.zig");
 const wcurl = @import("curl.zig");
 
-pub fn Parsed(comptime T: type) type {
-    return struct {
-        arena: *ArenaAllocator,
-        value: T,
-
-        pub fn deinit(self: @This()) void {
-            const allocator = self.arena.child_allocator;
-            self.arena.deinit();
-            allocator.destroy(self.arena);
-        }
-    };
-}
-
-const WatermarkedResponse = struct {
-    response: []const u8, //
-    id: u32,
-};
-
 pub fn http_get(allocator: std.mem.Allocator, client: *const curl.Easy, url: []const u8) ![]const u8 {
     const response = rsp: {
         const urlZ: [:0]u8 = try allocator.allocSentinel(u8, url.len, 0);
@@ -41,6 +23,12 @@ pub fn http_get(allocator: std.mem.Allocator, client: *const curl.Easy, url: []c
     if (response.status_code < 200 or response.status_code >= 300) {
         std.log.err("req failed with {d} for URL: {s}", .{ response.status_code, url });
         return error.StatusCodeErr;
+    }
+    var headerIterator = try response.iterateHeaders(.{});
+    while (try headerIterator.next()) |header| {
+        if (isCacheHit(&header)) {
+            return NetworkError.CacheHit;
+        }
     }
 
     const body_buffer = response.body orelse return error.NoBody;
@@ -79,46 +67,69 @@ pub fn http_post(allocator: std.mem.Allocator, client: *const curl.Easy, url: []
     return try allocator.dupe(u8, body_buffer.items);
 }
 
-pub fn extract_total(text: []const u8) ?u32 {
-    const needle = "\"total\":";
-    var start_pos = std.mem.indexOf(u8, text, needle) orelse {
-        return null;
-    };
-    start_pos += needle.len;
-    const end_pos = std.mem.indexOfPos(u8, text, start_pos, ",") orelse return null;
-    return std.fmt.parseInt(u32, text[start_pos..end_pos], 0) catch return null;
-}
-
 const available_page_sizes = [_]u32{ 50, 20, 15, 10, 5, 3, 2 };
 
-// const template_url = switch (builtin.mode) {
-//     .Debug => "http://127.0.0.1:8765/{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}",
-//     else => "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}",
-// };
-const template_url = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=0x{x}&pageSize={d}&catalogId={s}&catalogId={d}";
+const templateUrlApex = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&";
+const templateUrlComposite = "https://www.binance.{s}/bapi/composite/v1/public/cms/article/catalog/list/query?";
+const templateUrlGlobal = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?pageNo=0x{x}&type=1&pageSize={d}&lan={d}";
 
-pub const ChangeWaitingParams = struct { catalog_id: u16, tld: []const u8, seed: usize, anonymizer: ?[]const u8 };
-pub const PunchParams = struct {
+const templateUrlDebug = "http://127.0.0.1:8765/{s}/";
+const templateUrl = "{s}pageNo=0x{x}&pageSize={d}&catalogId={s}&catalogId={d}&lan={d}";
+
+pub const ChangeWaitingParams = struct {
     catalog_id: u16,
     tld: []const u8,
     seed: usize,
     anonymizer: ?[]const u8,
-    iterations: u32 = 500,
-    sleep: u32 = 100,
-    proxyManager: ?proxy.ProxyManager = null,
 };
 
-const catalogPages = struct {
-    const delisting = page.Pages.init(&[_]page.Pages.PageDecl{
+pub const FetchSingleParams = struct {
+    page: page.Pages.Page = page.Pages.Page{ .size = 10, .offset = 1 },
+    catalogId: u16,
+    tld: []const u8,
+    seed: usize,
+    anonymizer: ?[]const u8,
+};
+
+pub const FetchResult = struct {
+    url: []const u8,
+    body: []const u8,
+
+    pub fn clear(self: *const FetchResult, allocator: std.mem.Allocator) void {
+        allocator.free(self.url);
+        allocator.free(self.body);
+    }
+
+    pub fn extractTotal(self: *const FetchResult) ?u32 {
+        const needle = "\"total\":";
+        const text = self.body;
+        var start_pos = std.mem.indexOf(u8, text, needle) orelse {
+            return null;
+        };
+        start_pos += needle.len;
+        while (start_pos < text.len and std.ascii.isWhitespace(text[start_pos])) {
+            start_pos += 1;
+        }
+        var i: usize = 0;
+        while (std.ascii.isDigit(text[start_pos + i])) {
+            i += 1;
+        }
+        const end_pos = start_pos + i;
+        return std.fmt.parseInt(u32, text[start_pos..end_pos], 0) catch return null;
+    }
+};
+
+pub const catalogPages = struct {
+    pub const delisting = page.Pages.init(&[_]page.Pages.PageDecl{
         .{ .size = 2, .maxOffsetAvailable = 30 },
         .{ .size = 3, .maxOffsetAvailable = 10 },
-        .{ .size = 5, .maxOffsetAvailable = 25 },
-        .{ .size = 10, .maxOffsetAvailable = 20 },
+        .{ .size = 5, .maxOffsetAvailable = 10 },
+        .{ .size = 10, .maxOffsetAvailable = 10 },
         .{ .size = 15, .maxOffsetAvailable = 9 },
         .{ .size = 20, .maxOffsetAvailable = 7 },
         .{ .size = 50, .maxOffsetAvailable = 3 },
     });
-    const listing = page.Pages.init(&[_]page.Pages.PageDecl{
+    pub const listing = page.Pages.init(&[_]page.Pages.PageDecl{
         .{ .size = 2, .maxOffsetAvailable = 30 },
         .{ .size = 3, .maxOffsetAvailable = 30 },
         .{ .size = 5, .maxOffsetAvailable = 20 },
@@ -127,130 +138,48 @@ const catalogPages = struct {
         .{ .size = 20, .maxOffsetAvailable = 20 },
         .{ .size = 50, .maxOffsetAvailable = 10 },
     });
-    const default = page.Pages.init(&[_]page.Pages.PageDecl{
+    pub const default = page.Pages.init(&[_]page.Pages.PageDecl{
         .{ .size = 2, .maxOffsetAvailable = 100 },
-        .{ .size = 3, .maxOffsetAvailable = 20 },
-        .{ .size = 5, .maxOffsetAvailable = 30 },
-        .{ .size = 10, .maxOffsetAvailable = 27 },
-        .{ .size = 15, .maxOffsetAvailable = 9 },
-        .{ .size = 20, .maxOffsetAvailable = 7 },
-        .{ .size = 50, .maxOffsetAvailable = 3 },
+        .{ .size = 3, .maxOffsetAvailable = 50 },
+        .{ .size = 5, .maxOffsetAvailable = 50 },
+        .{ .size = 10, .maxOffsetAvailable = 20 },
+        .{ .size = 15, .maxOffsetAvailable = 10 },
+        .{ .size = 20, .maxOffsetAvailable = 10 },
+        .{ .size = 50, .maxOffsetAvailable = 10 },
     });
 };
 
-pub fn fetch_total(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const ChangeWaitingParams) !u32 {
-    const catalogConfig = switch (config.catalog_id) {
-        161 => catalogPages.delisting,
-        48 => catalogPages.listing,
-        else => catalogPages.default,
-    };
-
-    const queryPage = catalogConfig.atOffset(config.seed);
-    const zeroPrefix = std.math.pow(usize, 10, ((config.seed ^ config.seed >> 2) % 8) + 1);
-    const catalogStrDirty = try std.fmt.allocPrint(allocator, "{d}{d}", .{ zeroPrefix, config.catalog_id });
-    defer allocator.free(catalogStrDirty);
-    const catalogStr = catalogStrDirty[1..];
-    std.log.debug("Query page size {d} at offset {d} and catalog {s}", .{ queryPage.size, queryPage.offset, catalogStr });
-    const url = try std.fmt.allocPrint(allocator, template_url, .{ config.tld, queryPage.offset, queryPage.size, catalogStr, config.seed });
-    defer allocator.free(url);
-
-    const body = if (config.anonymizer) |anonymizer_addr|
-        try http_post(allocator, easy, anonymizer_addr, url)
-    else
-        try http_get(allocator, easy, url);
-
-    defer allocator.free(body);
-    const total = extract_total(body) orelse {
-        std.log.err("NNF: {d}:{d},{d}: {s}", .{ config.catalog_id, queryPage.size, queryPage.offset, body });
-        return error.NeedleNotFound;
-    };
-    return total;
-}
-
-pub fn punch_announce_update(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const PunchParams, new_total: u32) !?[]const u8 {
-    const fetch_url = cid: {
-        const zero_pad = try repeatZ(allocator, "0", (config.seed ^ (config.seed >> 3)) % 14);
-        defer allocator.free(zero_pad);
-        const plus_pad = try repeatZ(allocator, "+", (config.seed ^ (config.seed >> 2)) % 3);
-        defer allocator.free(plus_pad);
-        const tweaked_catalog_id = try std.fmt.allocPrint(allocator, "{s}{s}{d}", .{ plus_pad, zero_pad, config.catalog_id });
-        defer allocator.free(tweaked_catalog_id);
-        break :cid try std.fmt.allocPrint(allocator, template_url, .{ config.tld, 1, 1, tweaked_catalog_id, config.seed });
-    };
-
-    defer allocator.free(fetch_url);
-    var time_spent_query = std.time.milliTimestamp();
+pub fn fetchPage(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const FetchSingleParams) !?FetchResult {
+    std.debug.assert(config.page.size > 0);
+    std.debug.assert(config.page.offset > 0);
+    const fetch_url = buildUrl(allocator, config) catch unreachable;
+    errdefer allocator.free(fetch_url);
     const body_request = if (config.anonymizer) |anonymizer_addr|
         http_post(allocator, easy, anonymizer_addr, fetch_url)
     else
         http_get(allocator, easy, fetch_url);
     const body = try body_request;
-    const total = extract_total(body) orelse {
-        std.log.warn("NT {s}...", .{body[0..@min(200, body.len)]});
-        allocator.free(body);
-        return null;
-    };
-    time_spent_query = std.time.milliTimestamp() - time_spent_query;
-    if (total >= new_total) {
-        return body;
-    } else {
-        allocator.free(body);
-    }
-    return null;
+    errdefer allocator.free(body);
+    return .{ .body = body, .url = fetch_url };
 }
 
-// pub fn wait_for_announcement(allocator: std.mem.Allocator, seed: usize) !void {
-//     const curl_module = try wcurl.Curl.init(allocator);
-//     defer curl_module.deinit();
-//     const easy = curl_module.easy;
-//
-//     const announcements_hack = [_][]const u8{ "a%256e%256e%256f%2575%256e%2563eme%256et", "a%256e%256e%256fu%256e%2563e%256de%256et", "a%256e%256eou%256e%2563%2565men%2574", "an%256e%256f%2575%256e%2563e%256d%2565n%2574", "an%256e%256func%2565%256de%256et", "an%256e%256func%2565ment", "an%256e%256funce%256den%2574", "an%256eo%2575%256e%2563%2565m%2565%256et", "an%256eo%2575n%2563eme%256et", "an%256eo%2575nce%256d%2565nt", "an%256eo%2575ncem%2565nt", "an%256eou%256e%2563%2565ment", "an%256eou%256ec%2565ment", "ann%256f%2575nc%2565ment", "ann%256fun%2563%2565%256d%2565nt", "ann%256fun%2563ement", "anno%2575%256ec%2565%256d%2565%256et", "anno%2575nce%256dent", "annou%256e%2563ement", "annou%256ec%2565me%256et", "annou%256ecem%2565%256et", "annou%256ecem%2565nt", "annou%256eceme%256et", "annou%256ecemen%2574", "annou%256ecement", "announ%2563e%256de%256et", "announc%2565%256d%2565n%2574", "announc%2565m%2565n%2574", "announcement" };
-//     const domain_suffixes = [_][]const u8{ "info", "com" };
-//     var latest_fingerprint: u32 = 0;
-//     for (1..10000) |outer_iter| {
-//         std.log.info("iteration {d}, fingerprint {d}", .{ outer_iter, latest_fingerprint });
-//         var time_counter: u96 = 0;
-//         const max_url_padding = 495;
-//         const suffix = domain_suffixes[(outer_iter + seed) % domain_suffixes.len];
-//         for (1..max_url_padding) |iteration| {
-//             const hack = try repeatZ(allocator, "0", iteration);
-//             defer allocator.free(hack);
-//             const announcement_part = announcements_hack[(iteration + seed) % announcements_hack.len];
-//             const url_for_templating = "https://www.binance.{s}/en/support/{s}/list/{s}93";
-//             const binance_url = try std.fmt.allocPrint(allocator, url_for_templating, //
-//                 .{ suffix, announcement_part, hack });
-//             defer allocator.free(binance_url);
-//             const ts_before = std.time.nanoTimestamp();
-//             const result = try http_get(allocator, &easy, binance_url);
-//             const request_time_ms = @divFloor(std.time.nanoTimestamp() - ts_before, 1_000_000);
-//             time_counter += @intCast(request_time_ms);
-//             std.log.debug("query performed in {d}ms, {s}", .{ request_time_ms, binance_url });
-//             defer result.deinit();
-//             const new_fingerprint = result.value.id;
-//             if (latest_fingerprint < new_fingerprint) {
-//                 const latest_news_timestamp = extract_timestamp(result.value.response) orelse 0;
-//                 const ts = std.time.timestamp();
-//                 std.log.info("watermark changed for url {s}", .{binance_url});
-//                 if (latest_fingerprint != 0) {
-//                     std.log.info("watermark changed,{d},{d},{d}, {d} ::{d} seconds", .{ ts, latest_fingerprint, new_fingerprint, latest_news_timestamp, @divFloor(latest_news_timestamp, 1000) - ts });
-//
-//                     var dirPath: [100]u8 = undefined;
-//                     const absPath = try std.fs.selfExeDirPath(&dirPath);
-//                     const tsString = try std.fmt.allocPrintZ(allocator, "{d}", .{ts});
-//                     defer allocator.free(tsString);
-//                     const path = try std.fs.path.join(allocator, &[_][]const u8{ absPath, tsString });
-//                     defer allocator.free(path);
-//                     try files.write_file(path, result.value.response);
-//                     std.log.debug("file successfully updated at {s}", .{path});
-//                 }
-//                 latest_fingerprint = new_fingerprint;
-//             }
-//             std.time.sleep(std.time.ns_per_s * 5);
-//         }
-//         std.log.info("loop {d} finished. req avg time: {d}", .{ outer_iter, time_counter / max_url_padding });
-//         std.time.sleep(std.time.ns_per_s * 30);
-//     }
-// }
+fn buildUrl(allocator: std.mem.Allocator, config: *const FetchSingleParams) ![]const u8 {
+    // const zeroPad = try repeatZ(allocator, "0", (config.seed ^ (config.seed >> 3)) % 14);
+    // defer allocator.free(zeroPad);
+    // const plusPad = try repeatZ(allocator, "+", (config.seed ^ (config.seed >> 2)) % 3);
+    // defer allocator.free(plusPad);
+    // const tweakedCatalogId = try std.fmt.allocPrint(allocator, "{s}{s}{d}", .{ plusPad, zeroPad, config.catalogId });
+    // defer allocator.free(tweakedCatalogId);
+    // const urlBase = try std.fmt.allocPrint(allocator, templateUrlApex, .{config.tld});
+    // defer allocator.free(urlBase);
+    // return try std.fmt.allocPrint(allocator, templateUrl, .{ urlBase, config.page.offset, config.page.size, tweakedCatalogId, config.seed, config.seed });
+    return try std.fmt.allocPrint(allocator, templateUrlGlobal, .{
+        config.tld,
+        config.page.offset,
+        config.page.size,
+        config.seed,
+    });
+}
 
 pub fn extract_timestamp(body: []const u8) ?i128 {
     const needle = "releaseDate\":";
@@ -279,89 +208,20 @@ pub fn exctact_id_and_tokens(body: []const u8) struct { id: u32, tokens: []const
     return .{ .id = id, .tokens = "" };
 }
 
-pub fn isCacheHit(header: *const http.Header) bool {
-    if (std.mem.eql(u8, header.name, "CF-Cache-Status") and !std.mem.eql(u8, header.value, "MISS") and !std.mem.eql(u8, header.value, "DYNAMIC")) {
-        std.log.debug("", .{});
-        .warn("Cache hit! Cloudflare: {s}", .{header.value});
+pub fn isCacheHit(header: *const curl.Easy.Response.Header) bool {
+    if (std.mem.eql(u8, header.name, "CF-Cache-Status") and !std.mem.eql(u8, header.get(), "MISS") and !std.mem.eql(u8, header.get(), "DYNAMIC")) {
+        std.log.warn("Cache hit! Cloudflare: {s}", .{header.get()});
         return true;
     }
-    if (std.mem.eql(u8, header.name, "X-Cache") and !std.mem.eql(u8, header.value, "Miss from cloudfront")) {
-        std.log.warn("Cache hit! CloudFront: {s}", .{header.value});
+    if (std.mem.eql(u8, header.name, "X-Cache") and !std.mem.eql(u8, header.get(), "Miss from cloudfront")) {
+        std.log.warn("Cache hit! CloudFront: {s}", .{header.get()});
         return true;
     }
     return false;
 }
 
-pub fn perform_timing_tests(allocator: std.mem.Allocator) !void {
-    const warmup = "https://www.binance.me/en/support/announcement";
-    const url_for_templating = "https://www.binance.me/en/support/announcement/list/{s}";
-
-    // const warmup = "https://www.binance.info/bapi/apex/v1/public/apex/cms/article/list/query";
-    // const url_for_templating = "https://www.binance.info/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo={s}&pageSize=2&catalogId=161";
-    const catalog = "93";
-    const baselineURL = std.fmt.comptimePrint(url_for_templating, .{catalog});
-    var client = std.http.Client{ .allocator = allocator };
-    defer client.deinit();
-    var buffer: [18096]u8 = undefined;
-
-    for (1..300) |iteration| {
-        const hack = try repeatZ(allocator, "0", iteration);
-        defer allocator.free(hack);
-        const hexed = try std.mem.concat(allocator, u8, &[_][]const u8{ hack, catalog });
-        defer allocator.free(hexed);
-        const headers = [_]http.Header{
-            http.Header{ .name = "Origin", .value = hexed }, //
-            //                http.Header{ .name = "Host", .value = "www.binance.info" },
-        };
-        const binanceURLHexed = try std.fmt.allocPrint(
-            allocator,
-            url_for_templating,
-            .{hexed},
-        );
-
-        defer allocator.free(binanceURLHexed);
-        // warmup
-        _ = try timedRequest(&client, &buffer, &headers, warmup, false);
-        std.time.sleep(std.time.ns_per_s);
-        //baseline
-        var diff = @divTrunc(try timedRequest(&client, &buffer, &headers, baselineURL, true), 1000000);
-        std.debug.print("{d}, baseline, {d}, {s}\n", .{ iteration, diff, baselineURL });
-        std.time.sleep(std.time.ns_per_s);
-        //test
-        diff = @divTrunc(try timedRequest(&client, &buffer, &headers, binanceURLHexed, true), 1000000);
-        std.debug.print("{d}, test, {d}, {s}\n", .{ iteration, diff, binanceURLHexed });
-        std.time.sleep(std.time.ns_per_s);
-    }
-}
-
 pub const NetworkError = error{ QueryFailed, CacheHit };
 pub const ApplicationError = error{TextNotFound};
-
-pub fn timedRequest(client: *http.Client, buffer: []u8, headers: []const http.Header, url: []const u8, fail_on_err: bool) !i128 {
-    var req = try client.open(.HEAD, try std.Uri.parse(url), .{
-        .server_header_buffer = buffer, //
-        .extra_headers = headers,
-        .redirect_behavior = .not_allowed,
-    });
-    defer req.deinit();
-    const start = std.time.nanoTimestamp();
-    try req.send();
-    try req.wait();
-    const end = std.time.nanoTimestamp();
-    var headerIterator = req.response.iterateHeaders();
-    if (fail_on_err) {
-        while (headerIterator.next()) |header| {
-            if (isCacheHit(&header)) {
-                return NetworkError.CacheHit;
-            }
-        }
-        if (req.response.status != .ok) {
-            std.log.err("HTTP request failed with status code: {?s} for URL: {s}", .{ req.response.status.phrase(), url });
-            return NetworkError.CacheHit;
-        }
-    }
-    return end - start;
-}
 
 fn repeatZ(allocator: std.mem.Allocator, pattern: []const u8, count: usize) ![:0]u8 {
     const len = pattern.len * count;
