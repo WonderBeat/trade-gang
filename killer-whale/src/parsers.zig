@@ -1,4 +1,5 @@
 const std = @import("std");
+const binance = @import("binance.zig");
 const expect = std.testing.expect;
 
 const ParsedAnnounce = struct { id: u32, title: []const u8, ts: i64 };
@@ -31,48 +32,23 @@ test "detect delisting" {
     try expect(listing_delisting("Binance Announced the First Batch of Vote to List Results and Will List Mubarak (MUBARAK), CZ'S Dog (BROCCOLI714), Tutorial (TUT), and Banana For Scale (BANANAS31) With Seed Tags Applied") == 3);
 }
 
-pub fn extract_announce_content(body: []const u8) ?ParsedAnnounce {
-    const id_needle = "\"id\":";
-    const title_needle = "\"title\":\"";
-    const release_date_needle = "\"releaseDate\":";
-
-    const id_start_index = std.mem.indexOf(u8, body, id_needle) orelse return .{ .id = 0, .title = "", .ts = 0 };
-    const id_start = id_start_index + id_needle.len;
-    var id_end: usize = id_start;
-    while (id_end < body.len and std.ascii.isDigit(body[id_end])) {
-        id_end += 1;
-    }
-    const id_slice = body[id_start..id_end];
-    const id = std.fmt.parseInt(u32, id_slice, 10) catch return null;
-
-    const title_start_index = std.mem.indexOf(u8, body, title_needle) orelse return null;
-    const title_start = title_start_index + title_needle.len;
-    var title_end: usize = title_start;
-    while (title_end < body.len and body[title_end] != '"') {
-        title_end += 1;
-    }
-    const title = body[title_start..title_end];
-
-    const date_start_index = std.mem.indexOf(u8, body, release_date_needle) orelse return null;
-    const date_start = date_start_index + release_date_needle.len;
-    var date_end: usize = date_start;
-    while (date_end < body.len and std.ascii.isDigit(body[date_end])) {
-        date_end += 1;
-    }
-    const date = std.fmt.parseInt(i64, body[date_start..date_end], 0) catch return null;
-
+pub fn extractAnnounceContent(fetchRes: *const binance.FetchResult) ?ParsedAnnounce {
+    const id = fetchRes.extractID() orelse return null;
+    const title = fetchRes.extractTitle() orelse return null;
+    const date = fetchRes.extractReleaseDate() orelse return null;
     return .{ .id = id, .title = title, .ts = date };
 }
 
 test "extract announce from response" {
     const response = "{\"code\":\"000000\",\"message\":null,\"messageDetail\":null,\"data\":{\"catalogs\":[{\"catalogId\":161,\"parentCatalogId\":null,\"icon\":\"https://public.bnbstatic.com/image/cms/content/body/202202/ad416a7598c8327ee59a6052c001c9b9.png\",\"catalogName\":\"Delisting\",\"description\":null,\"catalogType\":1,\"total\":252,\"articles\":[{\"id\":207063,\"code\":\"e2fcd2c945654c8d832395335429403e\",\"title\":\"Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26\",\"type\":1,\"releaseDate\":1723446011329},{\"id\":206836,\"code\":\"e633a048a38a44c29828a441e4c4dac2\",\"title\":\"Notice of Removal of Spot Trading Pairs - 2024-08-02\",\"type\":1,\"releaseDate\":1722409208662}],\"catalogs\":[]}]},\"success\":true}";
-    const result = extract_announce_content(response) orelse unreachable;
+    const fetch = binance.FetchResult{ .body = response, .url = "" };
+    const result = extractAnnounceContent(&fetch) orelse unreachable;
     try expect(result.id == 207063);
     try expect(result.ts == 1723446011329);
     try expect(std.ascii.eqlIgnoreCase(result.title, "Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26"));
 }
 
-pub fn extract_coins_from_text(allocator: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+pub fn extractCoins(allocator: std.mem.Allocator, text: []const u8) ![]const []const u8 {
     var list = std.ArrayList([]const u8).init(allocator);
     defer list.deinit();
 
@@ -107,7 +83,7 @@ pub fn extract_coins_from_text(allocator: std.mem.Allocator, text: []const u8) !
 test "extract coins from title 1" {
     const alloc = std.testing.allocator;
     const title = "Binance Will Delist ANT, MULTI, VAI, XMR on 2024-02-20";
-    const result = try extract_coins_from_text(alloc, title);
+    const result = try extractCoins(alloc, title);
     defer alloc.free(result);
     try expect(std.mem.eql(u8, result[0], "ANT"));
     try expect(std.mem.eql(u8, result[1], "MULTI"));
@@ -118,7 +94,7 @@ test "extract coins from title 1" {
 test "extract coins from title 2" {
     const alloc = std.testing.allocator;
     const title = "Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26";
-    const result = try extract_coins_from_text(alloc, title);
+    const result = try extractCoins(alloc, title);
     defer alloc.free(result);
     try expect(std.mem.eql(u8, result[0], "CVP"));
     try expect(std.mem.eql(u8, result[1], "EPX"));
@@ -132,7 +108,7 @@ test "extract coins from title 3" {
     const alloc = std.testing.allocator;
     const title =
         "Binance Announced the First Batch of Vote to List Results and Will List Mubarak (MUBARAK), CZ'S Dog (BROCCOLI714), Tutorial (TUT), and Banana For Scale (BANANAS31) With Seed Tags Applied";
-    const result = try extract_coins_from_text(alloc, title);
+    const result = try extractCoins(alloc, title);
     defer alloc.free(result);
     try expect(std.mem.eql(u8, result[0], "MUBARAK"));
     try expect(std.mem.eql(u8, result[1], "BROCCOLI714"));
@@ -144,7 +120,7 @@ test "extract coins from title 4" {
     const alloc = std.testing.allocator;
     const title =
         "Introducing Babylon (BABY) on Binance HODLer Airdrops! Earn BABY With Retroactive BNB Simple Earn Subscriptions";
-    const result = try extract_coins_from_text(alloc, title);
+    const result = try extractCoins(alloc, title);
     defer alloc.free(result);
     try expect(std.mem.eql(u8, result[0], "BABY"));
     try expect(std.mem.eql(u8, result[1], "BABY"));

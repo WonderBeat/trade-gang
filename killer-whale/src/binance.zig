@@ -101,21 +101,64 @@ pub const FetchResult = struct {
     }
 
     pub fn extractTotal(self: *const FetchResult) ?u32 {
-        const needle = "\"total\":";
-        const text = self.body;
-        var start_pos = std.mem.indexOf(u8, text, needle) orelse {
-            return null;
-        };
-        start_pos += needle.len;
-        while (start_pos < text.len and std.ascii.isWhitespace(text[start_pos])) {
-            start_pos += 1;
+        const result = self.extractFirstOccurence("\"total\":") orelse return null;
+        return std.fmt.parseInt(u32, result, 0) catch return null;
+    }
+
+    pub fn extractReleaseDate(self: *const FetchResult) ?i64 {
+        const result = self.extractFirstOccurence("\"releaseDate\":") orelse return null;
+        return std.fmt.parseInt(i64, result, 0) catch return null;
+    }
+
+    pub fn extractCatalogId(self: *const FetchResult) ?u16 {
+        const result = self.extractFirstOccurence("\"catalogId\":") orelse return null;
+        return std.fmt.parseInt(u16, result, 0) catch return null;
+    }
+
+    pub fn extractTitle(self: *const FetchResult) ?[]const u8 {
+        return self.extractFirstOccurence("\"title\":") orelse return null;
+    }
+
+    pub fn extractID(self: *const FetchResult) ?u32 {
+        const result = self.extractFirstOccurence("\"id\":") orelse return null;
+        return std.fmt.parseInt(u32, result, 0) catch return null;
+    }
+
+    fn extractFirstOccurence(self: *const FetchResult, comptime needle: []const u8) ?[]const u8 {
+        const start_index = std.mem.indexOf(u8, self.body, needle) orelse return null;
+        var start = start_index + needle.len;
+        // Skip whitespace
+        while (start < self.body.len and std.ascii.isWhitespace(self.body[start])) {
+            start += 1;
         }
-        var i: usize = 0;
-        while (std.ascii.isDigit(text[start_pos + i])) {
-            i += 1;
+        // Check if it's a string
+        if (start < self.body.len and self.body[start] == '"') {
+            start += 1;
+            var end: usize = start;
+            while (end < self.body.len) {
+                if (self.body[end] == '\\' and end + 1 < self.body.len and self.body[end + 1] == '"') {
+                    // Escaped quote, skip the backslash and the quote
+                    end += 2;
+                } else if (self.body[end] == '"') {
+                    // Closing quote
+                    break;
+                } else {
+                    end += 1;
+                }
+            }
+            if (end < self.body.len) {
+                return self.body[start..end];
+            } else {
+                return null; // Unterminated string
+            }
+        } else {
+            // Extract until whitespace, comma, or closing brace
+            var end: usize = start;
+            while (end < self.body.len and !std.ascii.isWhitespace(self.body[end]) and self.body[end] != ',' and self.body[end] != '}') {
+                end += 1;
+            }
+            return self.body[start..end];
         }
-        const end_pos = start_pos + i;
-        return std.fmt.parseInt(u32, text[start_pos..end_pos], 0) catch return null;
     }
 };
 
@@ -181,34 +224,7 @@ fn buildUrl(allocator: std.mem.Allocator, config: *const FetchSingleParams) ![]c
     });
 }
 
-pub fn extract_timestamp(body: []const u8) ?i128 {
-    const needle = "releaseDate\":";
-    const index = std.mem.indexOf(u8, body, needle) orelse return null;
-    const start_ts = index + needle.len;
-    var i: usize = 0;
-    while (std.ascii.isDigit(body[start_ts + i])) {
-        i += 1;
-    }
-    const end_ts = start_ts + i;
-    return std.fmt.parseInt(i128, body[start_ts..end_ts], 0) catch blk: {
-        break :blk 0;
-    };
-}
-pub fn exctact_id_and_tokens(body: []const u8) struct { id: u32, tokens: []const u8 } {
-    const needle = "\"id\":";
-    const start_index = std.mem.indexOf(u8, body, needle) orelse return .{ .id = 0, .tokens = "" };
-    const start = start_index + needle.len;
-    var end: usize = start;
-    while (end < body.len and std.ascii.isDigit(body[end])) {
-        end += 1;
-    }
-    const id_slice = body[start..end];
-    const id = std.fmt.parseInt(u32, id_slice, 10) catch return .{ .id = 0, .tokens = "" };
-
-    return .{ .id = id, .tokens = "" };
-}
-
-pub fn isCacheHit(header: *const curl.Easy.Response.Header) bool {
+fn isCacheHit(header: *const curl.Easy.Response.Header) bool {
     if (std.mem.eql(u8, header.name, "CF-Cache-Status") and !std.mem.eql(u8, header.get(), "MISS") and !std.mem.eql(u8, header.get(), "DYNAMIC")) {
         std.log.warn("Cache hit! Cloudflare: {s}", .{header.get()});
         return true;
@@ -239,8 +255,85 @@ test "repeat pattern" {
     try expect(std.mem.eql(u8, pattern, "abcabc"));
 }
 
-test "extract timestamp" {
-    const text = "\"type\":1,\"releaseDate\":1742200205404},";
-    const result = extract_timestamp(text);
-    try expect(result == 1742200205404);
+test "extractTotal" {
+    // Test case 1: Valid total
+    {
+        const body = "{ \"total\": 12345 }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const total = fetch_result.extractTotal();
+        try expect(total != null and total.? == 12345);
+    }
+
+    // Test case 2: Total missing
+    {
+        const body = "{ \"other\": 123 }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const total = fetch_result.extractTotal();
+        try expect(total == null);
+    }
+
+    // Test case 3: Total with non-digit characters
+    {
+        const body = "{ \"total\": abc }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const total = fetch_result.extractTotal();
+        try expect(total == null);
+    }
+}
+
+test "extractReleaseDate" {
+
+    // Test case 1: Valid releaseDate
+    {
+        const body = "{ \"releaseDate\": 67890 }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const releaseDate = fetch_result.extractReleaseDate();
+        try expect(releaseDate != null and releaseDate.? == 67890);
+    }
+
+    // Test case 2: releaseDate missing
+    {
+        const body = "{ \"other\": 123 }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const releaseDate = fetch_result.extractReleaseDate();
+        try expect(releaseDate == null);
+    }
+}
+
+test "extractCatalogId" {
+
+    // Test case 1: Valid catalogId
+    {
+        const body = "{ \"catalogId\": 54321 }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const catalogId = fetch_result.extractCatalogId();
+        try expect(catalogId != null and catalogId.? == 54321);
+    }
+
+    // Test case 2: catalogId missing
+    {
+        const body = "{ \"other\": 123 }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const catalogId = fetch_result.extractCatalogId();
+        try expect(catalogId == null);
+    }
+}
+
+test "extractTitle" {
+
+    // Test case 1: Valid title
+    {
+        const body = "{ \"title\": \"example title\" }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const title = fetch_result.extractTitle();
+        try std.testing.expectEqualStrings("example title", title.?);
+    }
+
+    // Test case 2: title missing
+    {
+        const body = "{ \"other\": 123 }";
+        var fetch_result = FetchResult{ .url = "", .body = body };
+        const title = fetch_result.extractTitle();
+        try expect(title == null);
+    }
 }

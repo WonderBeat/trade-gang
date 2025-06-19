@@ -73,7 +73,7 @@ pub fn main() !void {
         if (matches.subcommandMatches("message")) |message_cmd_matches| {
             const address = message_cmd_matches.getSingleValue("address") orelse "127.0.0.1:8081";
             const title = "Binance Will Delist ANT, MULTI, VAI, XMR on 2024-02-20";
-            const tokens = try parse.extract_coins_from_text(allocator, title);
+            const tokens = try parse.extractCoins(allocator, title);
             defer allocator.free(tokens);
             const ip = try resolve_address(address);
             const bytes_sent = try messaging.send_announce(allocator, ip, &tokens, 77777, 69, &"LOVE YOU", false);
@@ -266,7 +266,7 @@ pub fn main() !void {
                 std.log.warn("Mqtt send error {s}", .{@errorName(errz)});
             };
             const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed, .lastSeenTotal = new_total };
-            const success = try punch_notify(allocator, curl_module, send_announce_address, &config);
+            const success = try punchNotify(allocator, curl_module, send_announce_address, &config);
             if (success) {
                 std.log.info("Update found as a result of a signal with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
             }
@@ -282,7 +282,7 @@ pub fn main() !void {
     std.log.info("Bruteforce something after {d}", .{latest_total});
     const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 999999);
     const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed, .sleep = 1200, .iterations = if (is_debug) 5 else @intCast(40 + seed % 20), .lastSeenTotal = latest_total };
-    const success = try punch_notify(allocator, curl_module, send_announce_address, &config);
+    const success = try punchNotify(allocator, curl_module, send_announce_address, &config);
     if (success) {
         std.log.info("Update was found with bruteforce with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
     }
@@ -314,7 +314,7 @@ fn passive_punch_mode(
             .anonymizer = anonymizer,
             .lastSeenTotal = alert.total,
         };
-        _ = try punch_notify(
+        _ = try punchNotify(
             allocator,
             curl_cli,
             send_announce_address,
@@ -352,7 +352,7 @@ const PunchParams = struct {
     proxyManager: ?proxy.ProxyManager = null,
 };
 
-fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *const PunchParams) !bool {
+fn punchNotify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *const PunchParams) !bool {
     try curl_cli.set_trim_body(0, 0);
     const easy = curl_cli.easy;
     var fetch_params = bin.FetchSingleParams{
@@ -408,18 +408,23 @@ fn punch_notify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_ur
             std.log.warn("No total in update {s}", .{update.url});
             break :no_update;
         };
-        const announce = parse.extract_announce_content(update.body) orelse {
-            std.log.warn("Mailformed announce {s}", .{update.url});
+        const announce = parse.extractAnnounceContent(&update) orelse {
+            std.log.warn("Mailformed announce {s}", .{update.body});
             break :no_update;
         };
-        if (announce.title.len < 5 or announce.ts < 1000) {
+        if (announce.title.len < 5 or announce.ts < 10000) {
             std.log.warn("Mailformed announce {d}:{d} {s}({d})", .{ announce.id, updated_id, announce.title, announce.ts });
             break :no_update;
         }
         const ts = std.time.timestamp();
         std.log.info("Timestamps: ours {d} announcement {d}, diff: {d}", .{ ts, announce.ts, ts - @divFloor(announce.ts, 1000) });
-        const coins = try parse.extract_coins_from_text(allocator, announce.title);
+        const coins = try parse.extractCoins(allocator, announce.title);
         defer allocator.free(coins);
+        const cid = update.extractCatalogId() orelse 0;
+        if (cid != config.catalogId) {
+            std.log.warn("Catalog mismatch {d} {d} {s}", .{ cid, config.catalogId, announce.title });
+            break :no_update;
+        }
         const is_important = parse.listing_delisting(announce.title) >= 3;
         if (coins.len == 0 and is_important) {
             std.log.warn("No coins found {d} {s}", .{ announce.id, announce.title });
