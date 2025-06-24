@@ -74,11 +74,12 @@ pub const Curl = struct {
         const headers = blk: {
             var h = try self.easy.createHeaders();
             errdefer h.deinit();
-            try h.add("Host", "www.binance.com:@31337");
+            //try h.add("Host", "www.binance.com");
+            try h.add("Authorization", "Basic dXN");
             try h.add("Accept", "*/*");
             //try h.add("Proxy-Connection", "keep-alive");
             //try h.add("lang", "en");
-            //try h.add("Accep-Language", "en-US,en;q=0.5");
+            try h.add("Accep-Language", "en-US,en;q=0.1");
             if (trim_to > 0) {
                 var buf: [20]u8 = undefined;
                 const size_str = try std.fmt.bufPrint(&buf, "bytes={d}-{d}", .{ trim_from, trim_to });

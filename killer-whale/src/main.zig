@@ -80,25 +80,16 @@ pub fn main() !void {
             std.log.debug("Msg sent {d} bytes", .{bytes_sent});
             return;
         } else if (matches.subcommandMatches("punch")) |punch_cmd| {
-            //const id = punch_cmd.getSingleValue("id") orelse return;
-            const address = punch_cmd.getSingleValue("anonymizer") orelse null;
+            const id = try std.fmt.parseInt(u16, punch_cmd.getSingleValue("id") orelse return, 0);
+            const anonymizer = punch_cmd.getSingleValue("anonymizer") orelse null;
             const tld = punch_cmd.getSingleValue("tld") orelse "me";
             const catalog = try std.fmt.parseInt(u16, punch_cmd.getSingleValue("catalog") orelse return, 0);
             const curl_module = try wcurl.Curl.init(allocator);
             defer curl_module.deinit();
-            const easy = curl_module.easy;
 
-            const config = bin.FetchSingleParams{
-                .catalogId = catalog,
-                .tld = tld,
-                .seed = 1,
-                .anonymizer = address,
-            };
-            const update = try bin.fetchPage(allocator, &easy, &config);
-            if (update) |result| {
-                std.log.info("Punched with result {s}...", .{result.body[0..300]});
-                result.clear(allocator);
-            }
+            const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = 0, .lastSeenTotal = id };
+            const success = try punchNotify(allocator, curl_module, try resolve_address("127.0.0.1:8888"), &config);
+            std.log.info("Punched with result {s}...", .{if (success) "success" else "failure"});
             return;
         } else if (matches.subcommandMatches("avalance")) |avalance_cmd| {
             const mqtt_address = avalance_cmd.getSingleValue("mqtt") orelse return;
@@ -214,7 +205,7 @@ pub fn main() !void {
                                     const nextPage = bin.fetchPage(allocator, &easy, &config) catch null;
                                     if (nextPage) |np| {
                                         defer np.clear(allocator);
-                                        std.log.debug("Next page total: {?d} for {s} / {?s}", .{ np.extractTotal(), np.url, curl_module.proxyManager.getCurrentProxy() });
+                                        std.log.info("Next page total: {?d} for {s} / {?s}", .{ np.extractTotal(), np.url, curl_module.proxyManager.getCurrentProxy() });
                                     } else {
                                         try curl_module.exchangeProxy();
                                     }
@@ -376,7 +367,6 @@ fn punchNotify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url
             break :not_found null;
         };
         if (result) |data| {
-            defer data.clear(allocator);
             if (data.extractTotal()) |total| {
                 prometheus.hit();
                 if (curl_cli.latest_query_metrics()) |metrics| {
@@ -389,6 +379,7 @@ fn punchNotify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url
                     break;
                 }
             } else {
+                data.clear(allocator);
                 std.log.err("Total not found: {s}", .{data.body});
             }
         }
