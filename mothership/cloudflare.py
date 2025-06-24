@@ -46,7 +46,11 @@ async def cloudflare_scrape(request):
     status = response.status_code
     resp_headers = {}
     for header, value in response.headers.items():
-        if "length" not in value.lower():
+        if (
+            "length" not in header.lower()
+            and "encoding" not in header.lower()
+            and "strict" not in header.lower()
+        ):
             resp_headers[header] = value
     response.close()
     global success_req_count
