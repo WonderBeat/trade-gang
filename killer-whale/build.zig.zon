@@ -46,6 +46,10 @@
             .url = "https://github.com/karlseguin/metrics.zig/archive/2b584b6209871b7215706028988169599451dc0d.tar.gz",
             .hash = "metrics-0.0.0-W7G4eCG0AQCQXidzvV5kx4l0smr_WCw-8JLIwS_OHYoW",
         },
+        .simdjzon = .{
+            .url = "git+https://github.com/travisstaloch/simdjzon#62ca9484520a088315f3b123605d2cf108b6abf1",
+            .hash = "simdjzon-0.0.1-7uNSgGddBQBshResiWQfzBc8Mt2w6WUDlsrF3HDJpWwL",
+        },
     },
     .paths = .{
         "build.zig",

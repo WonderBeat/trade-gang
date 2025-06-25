@@ -6,6 +6,7 @@ const App = yazap.App;
 const Arg = yazap.Arg;
 
 const bin = @import("binance.zig");
+const json = @import("json.zig");
 const messaging = @import("messaging.zig");
 const mqtt = @import("mqtt.zig");
 const parse = @import("parsers.zig");

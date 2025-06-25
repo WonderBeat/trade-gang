@@ -15,6 +15,9 @@ pub fn build(b: *std.Build) !void {
     });
     exe.addIncludePath(b.path("."));
 
+    const simdjzon_dep = b.dependency("simdjzon", .{ .target = target, .optimize = optimize });
+    exe.root_module.addImport("simdjzon", simdjzon_dep.module("simdjzon"));
+
     const metrics_dep = b.dependency("metrics", .{
         .target = target,
         .optimize = optimize,
@@ -87,6 +90,7 @@ pub fn build(b: *std.Build) !void {
     unit_tests.root_module.addImport("protobuf", protobuf_dep.module("protobuf"));
     unit_tests.root_module.addImport("mqttz", mqttz_dep.module("mqttz"));
     unit_tests.root_module.addImport("metrics", metrics_dep.module("metrics"));
+    unit_tests.root_module.addImport("simdjzon", simdjzon_dep.module("simdjzon"));
     unit_tests.linkSystemLibrary("curl");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
