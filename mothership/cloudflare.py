@@ -111,7 +111,7 @@ async def bootstrap_scraper():
         # proxy = "socks5://12.88.101.77:1080"
         proxies = {"http": proxy, "https": proxy}
         local_scraper = cloudscraper.create_scraper(
-            delay=4,
+            delay=6,
             # browser={"browser": browser, "platform": platform},
         )
         local_scraper.proxies = proxies

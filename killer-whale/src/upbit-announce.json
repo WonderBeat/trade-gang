@@ -1,0 +1,263 @@
+{
+  "success": true,
+  "data": {
+    "total_pages": 238,
+    "total_count": 4743,
+    "notices": [
+      {
+        "listed_at": "2025-07-28T20:10:07+09:00",
+        "first_listed_at": "2025-07-28T20:10:07+09:00",
+        "id": 5373,
+        "title": "업비트 코인빌리기 - 테더(USDT) 지원 종료 안내",
+        "category": "Service+",
+        "need_new_badge": true,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-28T18:30:25+09:00",
+        "first_listed_at": "2025-07-02T16:16:44+09:00",
+        "id": 5282,
+        "title": "네트워크 업그레이드에 따른 루나2(LUNA2) 출금 일시 중단 안내 (완료)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": true
+      },
+      {
+        "listed_at": "2025-07-28T18:06:14+09:00",
+        "first_listed_at": "2025-07-28T18:06:14+09:00",
+        "id": 5372,
+        "title": "명품시계의 인기 아이콘 Rolex Submariner, 126613LB 드롭스 ",
+        "category": "NFT",
+        "need_new_badge": true,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-28T18:00:00+09:00",
+        "first_listed_at": "2025-07-28T18:00:00+09:00",
+        "id": 5371,
+        "title": "Notice on Termination of Trading Support for Pundi AI(PUNDIAI) (8/28 15:00)",
+        "category": "Trade",
+        "need_new_badge": true,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-28T17:25:10+09:00",
+        "first_listed_at": "2025-07-28T17:25:10+09:00",
+        "id": 5370,
+        "title": "포스트 단색화 거장 김태호 화백이 마지막으로 남긴 유산 드롭스",
+        "category": "NFT",
+        "need_new_badge": true,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-28T14:39:11+09:00",
+        "first_listed_at": "2025-07-28T14:39:11+09:00",
+        "id": 5369,
+        "title": "Digital assets and Fiat deposit Due Diligence report (as of July 1st, 2025)",
+        "category": "Notice",
+        "need_new_badge": true,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-28T13:24:25+09:00",
+        "first_listed_at": "2025-07-28T13:24:25+09:00",
+        "id": 5368,
+        "title": "Market Support for Optimism(OP) (KRW, BTC, USDT Market)",
+        "category": "Trade",
+        "need_new_badge": true,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-28T11:17:33+09:00",
+        "first_listed_at": "2025-07-11T11:32:53+09:00",
+        "id": 5313,
+        "title": "Temporary suspension of Deposit/Withdrawal service for ATOM due to Network Upgrade (Completed)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": true
+      },
+      {
+        "listed_at": "2025-07-28T11:14:55+09:00",
+        "first_listed_at": "2025-07-28T11:14:55+09:00",
+        "id": 5367,
+        "title": "GAS/VTHO Distribution for the 4th week of July, 2025",
+        "category": "Digital Asset",
+        "need_new_badge": true,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-28T10:30:17+09:00",
+        "first_listed_at": "2025-07-03T15:35:55+09:00",
+        "id": 5286,
+        "title": "Temporary Suspension of AKT, XEC Digital Asset Withdrawals due to Wallet System Maintenance (Completed)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": true
+      },
+      {
+        "listed_at": "2025-07-25T14:28:36+09:00",
+        "first_listed_at": "2025-07-18T16:10:47+09:00",
+        "id": 5342,
+        "title": "네트워크 업그레이드에 따른 멀티버스엑스(EGLD) 입출금 일시 중단 안내 (완료)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-25T14:12:59+09:00",
+        "first_listed_at": "2025-07-25T14:12:59+09:00",
+        "id": 5366,
+        "title": "Temporary Suspension of TT, LTC Deposit/Withdrawal due to Wallet System Maintenance (07/31 23:00 ~)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-25T13:52:21+09:00",
+        "first_listed_at": "2025-07-25T13:52:21+09:00",
+        "id": 5365,
+        "title": "Temporary suspension of Deposit/Withdrawal service for STX due to Hardfork (07/29 12:00 ~)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-25T13:39:01+09:00",
+        "first_listed_at": "2025-07-18T15:17:09+09:00",
+        "id": 5340,
+        "title": "Temporary Suspension of MED, KAVA Digital Asset Withdrawals due to Wallet System Maintenance (Completed)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-25T11:19:51+09:00",
+        "first_listed_at": "2025-07-25T11:19:51+09:00",
+        "id": 5364,
+        "title": "Market Support for Huma Finance(HUMA) (BTC, USDT Market)",
+        "category": "Trade",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-25T11:19:50+09:00",
+        "first_listed_at": "2025-07-25T11:19:50+09:00",
+        "id": 5363,
+        "title": "Market Support for Maple Finance(SYRUP) (KRW, BTC, USDT Market)",
+        "category": "Trade",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-24T18:48:06+09:00",
+        "first_listed_at": "2025-07-24T18:48:06+09:00",
+        "id": 5362,
+        "title": "#있는 그대로의 나로 빛나는 법을 그려내는, 베리랜드에서 온 베리킴 작가 NFT 드롭스",
+        "category": "NFT",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-24T18:20:05+09:00",
+        "first_listed_at": "2025-07-23T14:46:23+09:00",
+        "id": 5357,
+        "title": "네트워크 업그레이드에 따른 앱토스(APT) 입출금 일시 중단 안내 (완료)",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-23T21:03:52+09:00",
+        "first_listed_at": "2025-07-23T21:03:52+09:00",
+        "id": 5360,
+        "title": "Temporary suspension of Withdrawal service for ZEN due to halt of Horizen Network",
+        "category": "D/W",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2025-07-23T18:00:00+09:00",
+        "first_listed_at": "2025-07-23T18:00:00+09:00",
+        "id": 5359,
+        "title": "Notice on Termination of Trading Support for Quiztok(QTCON) (8/25 15:00)",
+        "category": "Trade",
+        "need_new_badge": false,
+        "need_update_badge": false
+      }
+    ],
+    "fixed_notices": [
+      {
+        "listed_at": "2025-03-21T20:00:05+09:00",
+        "first_listed_at": "2022-08-25T20:00:02+09:00",
+        "id": 2895,
+        "title": "Restrictions and Precautions for Deposits/Withdrawals with Unreported VASPs According to Act on Reporting and Using Specified Financial Transaction Information (Added on 2025.03.21)",
+        "category": "Notice",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2024-06-07T19:21:29+09:00",
+        "first_listed_at": "2024-06-07T19:21:29+09:00",
+        "id": 4276,
+        "title": "Notice on Phishing Email Scams Targeting Issuers of Virtual Assets - Impersonation of Financial Supervisory Service Virtual Asset Inspection Team",
+        "category": "Notice",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2024-05-17T16:59:19+09:00",
+        "first_listed_at": "2024-05-17T16:59:19+09:00",
+        "id": 4219,
+        "title": "Guide to phishing text scam - Type of scam using the pretext of notifying users about the disposal of remaining digital assets in long-term inactive or dormant accounts",
+        "category": "Notice",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2024-03-20T16:43:52+09:00",
+        "first_listed_at": "2024-03-20T16:43:52+09:00",
+        "id": 4118,
+        "title": "Cautionary Notice for Investment Scams Using Fake Cryptocurrency Exchanges",
+        "category": "Notice",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2022-05-20T12:28:19+09:00",
+        "first_listed_at": "2022-05-20T12:28:19+09:00",
+        "id": 2677,
+        "title": "Warning and Risks on Digital Asset Trading",
+        "category": "Notice",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2022-05-18T22:10:10+09:00",
+        "first_listed_at": "2022-05-18T22:10:10+09:00",
+        "id": 2672,
+        "title": "Warning about Investing in Algorithmic Stablecoins and Related Digital Assets (Updated)",
+        "category": "Trade",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2022-03-29T19:45:41+09:00",
+        "first_listed_at": "2022-03-29T19:45:41+09:00",
+        "id": 2553,
+        "title": "Precautions for Deposits/withdrawals under the Travel Rule Implementation",
+        "category": "Notice",
+        "need_new_badge": false,
+        "need_update_badge": false
+      },
+      {
+        "listed_at": "2022-01-20T14:48:56+09:00",
+        "first_listed_at": "2022-01-20T14:48:56+09:00",
+        "id": 2397,
+        "title": "Precautions on Incorrect Deposits of Digital Assets",
+        "category": "Notice",
+        "need_new_badge": false,
+        "need_update_badge": false
+      }
+    ]
+  }
+}

@@ -54,3 +54,9 @@ pub fn initializeMetrics(comptime opts: m.RegistryOpts) !void {
 pub fn writeMetrics(writer: anytype) !void {
     return m.write(&metrics, writer);
 }
+
+pub fn dumpToFile() !void {
+    const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
+    defer file.close();
+    try writeMetrics(file.writer());
+}

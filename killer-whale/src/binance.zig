@@ -11,6 +11,7 @@ const files = @import("file/files.zig");
 const messaging = @import("messaging.zig");
 const page = @import("page.zig");
 const wcurl = @import("curl.zig");
+const simdjzon = @import("simdjzon");
 
 pub fn http_get(allocator: std.mem.Allocator, client: *const curl.Easy, url: []const u8) ![]const u8 {
     const response = rsp: {
@@ -71,7 +72,7 @@ const available_page_sizes = [_]u32{ 50, 20, 15, 10, 5, 3, 2 };
 
 const templateUrlApex = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?type=1&";
 const templateUrlComposite = "https://www.binance.{s}/bapi/composite/v1/public/cms/article/catalog/list/query?";
-const templateUrlGlobal = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?pageNo=0x{x}&type=1&pageSize={d}&lan={d}";
+const templateUrlGlobal = "https://www.binance.{s}/bapi/apex/v1/public/apex/cms/article/list/query?pageNo={s}0x{s}{x}&type=1&pageSize={d}&lan={d}";
 
 const templateUrlDebug = "http://127.0.0.1:8765/{s}/";
 const templateUrl = "{s}pageNo=0x{x}&pageSize={d}&catalogId={s}&catalogId={d}&lan={d}";
@@ -83,7 +84,7 @@ pub const ChangeWaitingParams = struct {
     anonymizer: ?[]const u8,
 };
 
-pub const FetchSingleParams = struct {
+pub const FetchParams = struct {
     page: page.Pages.Page = page.Pages.Page{ .size = 10, .offset = 1 },
     catalogId: u16,
     tld: []const u8,
@@ -91,73 +92,177 @@ pub const FetchSingleParams = struct {
     anonymizer: ?[]const u8,
 };
 
-pub const FetchResult = struct {
+pub const Announce = struct {
+    allocator: std.mem.Allocator,
     url: []const u8,
-    body: []const u8,
+    total: u32,
+    releaseDate: i64,
+    catalogId: u16,
+    title: []const u8,
+    _titleGc: bool = false,
+    id: u32,
 
-    pub fn clear(self: *const FetchResult, allocator: std.mem.Allocator) void {
-        allocator.free(self.url);
-        allocator.free(self.body);
+    pub fn parseFirstEveryCatalog(allocator: std.mem.Allocator, url: []const u8, body: []const u8) !std.ArrayList(Announce) {
+        var result = std.ArrayList(Announce).init(allocator);
+        errdefer {
+            for (result.items) |article| {
+                article.deinit();
+            }
+            result.deinit();
+        }
+        var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(body) };
+        var parser = try simdjzon.ondemand.Parser.init(&src, allocator, "<s>", .{});
+        defer parser.deinit();
+        var doc = try parser.iterate();
+        var dataSection = try doc.at_pointer("/data/catalogs");
+        var arr = try dataSection.get_array();
+        var arrit = arr.iterator();
+        catalogLoop: while (try arrit.next()) |next| {
+            var nxt = try @constCast(&next).get_object(); // drop const
+            var cidNode = nxt.find_field("catalogId") catch return error.NoCatalogId;
+            const cid = cidNode.get_int(u16) catch return error.NoCatalogId;
+            var totalNode = nxt.find_field("total") catch return error.NoTotal;
+            const total = totalNode.get_int(u16) catch return error.NoTotal;
+            var articlesNode = nxt.find_field("articles") catch return error.NoArticles;
+            var articlesit = (articlesNode.get_array() catch return error.NoArticles).iterator();
+            while (try articlesit.next()) |nextArticle| {
+                var nxtArticle = nextArticle;
+                var releaseDateNode = nxtArticle.find_field("releaseDate") catch return error.NoReleaseDate;
+                var titleNode = nxtArticle.find_field("title") catch return error.NoTitle;
+                var idNode = nxtArticle.find_field("id") catch return error.NoId;
+                const urlCopy = try allocator.dupe(u8, url);
+                errdefer allocator.free(urlCopy);
+                const title = titleNode.get_string_alloc([]u8, allocator) catch return error.NoTitle;
+                errdefer deinitTitle(allocator, title);
+                const anotherOne = Announce{
+                    .allocator = allocator,
+                    .url = urlCopy,
+                    .total = total,
+                    .releaseDate = releaseDateNode.get_int(i64) catch return error.NoReleaseDate,
+                    .catalogId = cid,
+                    .title = title,
+                    ._titleGc = true,
+                    .id = idNode.get_int(u32) catch return error.NoId,
+                };
+                try result.append(anotherOne);
+                continue :catalogLoop;
+            }
+        }
+        return result;
     }
 
-    pub fn extractTotal(self: *const FetchResult) ?u32 {
-        const result = self.extractFirstOccurence("\"total\":") orelse return null;
+    pub fn parsePartialResponse(allocator: std.mem.Allocator, url: []const u8, body: []const u8) ?Announce {
+        var result = Announce{
+            .allocator = allocator,
+            .url = url,
+            .total = 0,
+            .releaseDate = 0,
+            .catalogId = 0,
+            .title = "",
+            .id = 0,
+        };
+        const total = Announce.extractTotal(body) orelse {
+            std.log.debug("No total in update {s}", .{url});
+            return null;
+        };
+        const releaseDate = Announce.extractReleaseDate(body) orelse {
+            std.log.debug("No release date in update {s}", .{url});
+            return null;
+        };
+        const catalogId = Announce.extractCatalogId(body) orelse {
+            std.log.debug("No catalogId in update {s}", .{url});
+            return null;
+        };
+        const title = Announce.extractTitle(body) orelse {
+            std.log.debug("No title in update {s}", .{url});
+            return null;
+        };
+        const id = Announce.extractID(body) orelse {
+            std.log.debug("No id in update {s}", .{url});
+            return null;
+        };
+        result.total = total;
+        result.releaseDate = releaseDate;
+        result.catalogId = catalogId;
+        result.title = title;
+        result.id = id;
+        return result;
+    }
+
+    pub fn deinit(self: *const Announce) void {
+        self.allocator.free(self.url);
+        if (self._titleGc) {
+            deinitTitle(self.allocator, self.title);
+        }
+    }
+
+    // weird deinialization routine
+    fn deinitTitle(allocator: std.mem.Allocator, title: []const u8) void {
+        const start_ptr = title.ptr; // strange library allocation in parse_string_alloc
+        const len = title.len + 2;
+        const full_slice: []const u8 = @as([*]const u8, start_ptr)[0..len];
+        // Now free the memory using the adjusted slice
+        allocator.free(full_slice);
+    }
+
+    fn extractTotal(haystack: []const u8) ?u32 {
+        const result = extractFirstOccurence(haystack, "\"total\":") orelse return null;
         return std.fmt.parseInt(u32, result, 0) catch return null;
     }
 
-    pub fn extractReleaseDate(self: *const FetchResult) ?i64 {
-        const result = self.extractFirstOccurence("\"releaseDate\":") orelse return null;
+    fn extractReleaseDate(haystack: []const u8) ?i64 {
+        const result = extractFirstOccurence(haystack, "\"releaseDate\":") orelse return null;
         return std.fmt.parseInt(i64, result, 0) catch return null;
     }
 
-    pub fn extractCatalogId(self: *const FetchResult) ?u16 {
-        const result = self.extractFirstOccurence("\"catalogId\":") orelse return null;
+    fn extractCatalogId(haystack: []const u8) ?u16 {
+        const result = extractFirstOccurence(haystack, "\"catalogId\":") orelse return null;
         return std.fmt.parseInt(u16, result, 0) catch return null;
     }
 
-    pub fn extractTitle(self: *const FetchResult) ?[]const u8 {
-        return self.extractFirstOccurence("\"title\":") orelse return null;
+    fn extractTitle(haystack: []const u8) ?[]const u8 {
+        return extractFirstOccurence(haystack, "\"title\":") orelse return null;
     }
 
-    pub fn extractID(self: *const FetchResult) ?u32 {
-        const result = self.extractFirstOccurence("\"id\":") orelse return null;
+    fn extractID(haystack: []const u8) ?u32 {
+        const result = extractFirstOccurence(haystack, "\"id\":") orelse return null;
         return std.fmt.parseInt(u32, result, 0) catch return null;
     }
 
-    fn extractFirstOccurence(self: *const FetchResult, comptime needle: []const u8) ?[]const u8 {
-        const start_index = std.mem.indexOf(u8, self.body, needle) orelse return null;
+    fn extractFirstOccurence(haystack: []const u8, comptime needle: []const u8) ?[]const u8 {
+        const start_index = std.mem.indexOf(u8, haystack, needle) orelse return null;
         var start = start_index + needle.len;
         // Skip whitespace
-        while (start < self.body.len and std.ascii.isWhitespace(self.body[start])) {
+        while (start < haystack.len and std.ascii.isWhitespace(haystack[start])) {
             start += 1;
         }
         // Check if it's a string
-        if (start < self.body.len and self.body[start] == '"') {
+        if (start < haystack.len and haystack[start] == '"') {
             start += 1;
             var end: usize = start;
-            while (end < self.body.len) {
-                if (self.body[end] == '\\' and end + 1 < self.body.len and self.body[end + 1] == '"') {
+            while (end < haystack.len) {
+                if (haystack[end] == '\\' and end + 1 < haystack.len and haystack[end + 1] == '"') {
                     // Escaped quote, skip the backslash and the quote
                     end += 2;
-                } else if (self.body[end] == '"') {
+                } else if (haystack[end] == '"') {
                     // Closing quote
                     break;
                 } else {
                     end += 1;
                 }
             }
-            if (end < self.body.len) {
-                return self.body[start..end];
+            if (end < haystack.len) {
+                return haystack[start..end];
             } else {
                 return null; // Unterminated string
             }
         } else {
             // Extract until whitespace, comma, or closing brace
             var end: usize = start;
-            while (end < self.body.len and !std.ascii.isWhitespace(self.body[end]) and self.body[end] != ',' and self.body[end] != '}') {
+            while (end < haystack.len and !std.ascii.isWhitespace(haystack[end]) and haystack[end] != ',' and haystack[end] != '}') {
                 end += 1;
             }
-            return self.body[start..end];
+            return haystack[start..end];
         }
     }
 };
@@ -192,25 +297,43 @@ pub const catalogPages = struct {
     });
 };
 
-pub fn fetchPage(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const FetchSingleParams) !?FetchResult {
-    std.debug.assert(config.page.size > 0);
-    std.debug.assert(config.page.offset > 0);
-    const fetch_url = buildUrl(allocator, config) catch unreachable;
-    errdefer allocator.free(fetch_url);
-    const body_request = if (config.anonymizer) |anonymizer_addr|
-        http_post(allocator, easy, anonymizer_addr, fetch_url)
-    else
-        http_get(allocator, easy, fetch_url);
-    const body = try body_request;
-    errdefer allocator.free(body);
-    return .{ .body = body, .url = fetch_url };
+pub fn fetchDecodeLatestInEveryCatalog(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const FetchParams) !std.ArrayList(Announce) {
+    const url = try buildUrl(allocator, config);
+    defer allocator.free(url);
+    const body = try fetchPage(allocator, easy, url, config);
+    defer allocator.free(body);
+    return try Announce.parseFirstEveryCatalog(allocator, url, body);
 }
 
-fn buildUrl(allocator: std.mem.Allocator, config: *const FetchSingleParams) ![]const u8 {
-    // const zeroPad = try repeatZ(allocator, "0", (config.seed ^ (config.seed >> 3)) % 14);
-    // defer allocator.free(zeroPad);
-    // const plusPad = try repeatZ(allocator, "+", (config.seed ^ (config.seed >> 2)) % 3);
-    // defer allocator.free(plusPad);
+pub fn fetchDecodeLatestInCatalog(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const FetchParams) !?Announce {
+    const allArticles = try fetchDecodeLatestInEveryCatalog(allocator, easy, config);
+    defer allArticles.deinit();
+    var result: ?Announce = null;
+    for (allArticles.items) |article| {
+        if (article.catalogId == config.catalogId) {
+            result = article;
+        } else {
+            article.deinit();
+        }
+    }
+    return result;
+}
+
+pub fn fetchPage(allocator: std.mem.Allocator, easy: *const curl.Easy, url: []const u8, config: *const FetchParams) ![]const u8 {
+    std.debug.assert(config.page.size > 0);
+    std.debug.assert(config.page.offset > 0);
+    const body_request = if (config.anonymizer) |anonymizer_addr|
+        http_post(allocator, easy, anonymizer_addr, url)
+    else
+        http_get(allocator, easy, url);
+    return try body_request;
+}
+
+pub fn buildUrl(allocator: std.mem.Allocator, config: *const FetchParams) ![]const u8 {
+    const zeroPad = try repeatZ(allocator, "0", (config.seed ^ (config.seed >> 3)) % 13);
+    defer allocator.free(zeroPad);
+    const plusPad = try repeatZ(allocator, "+", (config.seed ^ (config.seed >> 2)) % 3);
+    defer allocator.free(plusPad);
     // const tweakedCatalogId = try std.fmt.allocPrint(allocator, "{s}{s}{d}", .{ plusPad, zeroPad, config.catalogId });
     // defer allocator.free(tweakedCatalogId);
     // const urlBase = try std.fmt.allocPrint(allocator, templateUrlApex, .{config.tld});
@@ -218,6 +341,8 @@ fn buildUrl(allocator: std.mem.Allocator, config: *const FetchSingleParams) ![]c
     // return try std.fmt.allocPrint(allocator, templateUrl, .{ urlBase, config.page.offset, config.page.size, tweakedCatalogId, config.seed, config.seed });
     return try std.fmt.allocPrint(allocator, templateUrlGlobal, .{
         config.tld,
+        plusPad,
+        zeroPad,
         config.page.offset,
         config.page.size,
         config.seed,
@@ -255,85 +380,54 @@ test "repeat pattern" {
     try expect(std.mem.eql(u8, pattern, "abcabc"));
 }
 
-test "extractTotal" {
-    // Test case 1: Valid total
+test "parsing partial response" {
+    const alloc = std.testing.allocator;
     {
-        const body = "{ \"total\": 12345 }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const total = fetch_result.extractTotal();
-        try expect(total != null and total.? == 12345);
+        const body = "{ \"title\": \"example title\", \"id\": 2, \"releaseDate\": 123, \"catalogId\": 23, \"total\": 10 }";
+        const fetchResult = Announce.parsePartialResponse(alloc, "", body) orelse unreachable;
+        try std.testing.expectEqualStrings("example title", fetchResult.title);
+        try std.testing.expectEqual(2, fetchResult.id);
+        try std.testing.expectEqual(123, fetchResult.releaseDate);
+        try std.testing.expectEqual(23, fetchResult.catalogId);
+        try std.testing.expectEqual(10, fetchResult.total);
     }
 
-    // Test case 2: Total missing
     {
         const body = "{ \"other\": 123 }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const total = fetch_result.extractTotal();
-        try expect(total == null);
-    }
-
-    // Test case 3: Total with non-digit characters
-    {
-        const body = "{ \"total\": abc }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const total = fetch_result.extractTotal();
-        try expect(total == null);
+        const fetchResult = Announce.parsePartialResponse(alloc, "", body);
+        try expect(fetchResult == null);
     }
 }
 
-test "extractReleaseDate" {
-
-    // Test case 1: Valid releaseDate
+test "parsing total response" {
+    const alloc = std.testing.allocator;
     {
-        const body = "{ \"releaseDate\": 67890 }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const releaseDate = fetch_result.extractReleaseDate();
-        try expect(releaseDate != null and releaseDate.? == 67890);
+        const body =
+            \\ {"code":"000000","messageDetail":null,"data":{"catalogs":[{"catalogId":48,"parentCatalogId":null,"catalogName":"New Cryptocurrency Listing","catalogType":1,"total":1819,"articles":[{"id":239914,"code":"80889caa7146492f9de2a2627fa30a4d","title":"Binance Futures Will Launch USDⓈ-Margined OLUSDT Perpetual Contract (2025-06-25)","type":1,"releaseDate":1750843841537}]}]}}
+        ;
+        const article = Announce.parsePartialResponse(alloc, "", body) orelse unreachable;
+        defer {
+            article.deinit();
+        }
+        try std.testing.expectEqual(48, article.catalogId);
+        try std.testing.expectEqual(1819, article.total);
     }
 
-    // Test case 2: releaseDate missing
     {
-        const body = "{ \"other\": 123 }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const releaseDate = fetch_result.extractReleaseDate();
-        try expect(releaseDate == null);
-    }
-}
-
-test "extractCatalogId" {
-
-    // Test case 1: Valid catalogId
-    {
-        const body = "{ \"catalogId\": 54321 }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const catalogId = fetch_result.extractCatalogId();
-        try expect(catalogId != null and catalogId.? == 54321);
-    }
-
-    // Test case 2: catalogId missing
-    {
-        const body = "{ \"other\": 123 }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const catalogId = fetch_result.extractCatalogId();
-        try expect(catalogId == null);
-    }
-}
-
-test "extractTitle" {
-
-    // Test case 1: Valid title
-    {
-        const body = "{ \"title\": \"example title\" }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const title = fetch_result.extractTitle();
-        try std.testing.expectEqualStrings("example title", title.?);
-    }
-
-    // Test case 2: title missing
-    {
-        const body = "{ \"other\": 123 }";
-        var fetch_result = FetchResult{ .url = "", .body = body };
-        const title = fetch_result.extractTitle();
-        try expect(title == null);
+        const body = @embedFile("global-announces.json");
+        const fetchResult = try Announce.parseFirstEveryCatalog(alloc, "", body);
+        defer {
+            for (fetchResult.items) |article| {
+                article.deinit();
+            }
+            fetchResult.deinit();
+        }
+        try std.testing.expectEqual(8, fetchResult.items.len);
+        const article = fetchResult.items[7];
+        try std.testing.expectEqual(128, article.catalogId);
+        try std.testing.expectEqual(49, article.total);
+        try std.testing.expectEqualStrings("Solayer (LAYER) Airdrop Continues: Second Binance HODLer Airdrops Announced – Earn LAYER With Retroactive BNB Simple Earn Subscriptions (2025-06-16)", article.title);
+        try std.testing.expectEqual(238891, article.id);
+        try std.testing.expectEqual(1750055401345, article.releaseDate);
     }
 }

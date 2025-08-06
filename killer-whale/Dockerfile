@@ -2,7 +2,7 @@ FROM --platform=$BUILDPLATFORM debian:bookworm
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ARG ZIG_VERSION=0.14.0
+ARG ZIG_VERSION=0.14.1
 WORKDIR /usr/src
 
 RUN apt-get update
@@ -33,6 +33,6 @@ RUN ./build.sh "$TARGETPLATFORM" "/application"
 FROM alpine:3.21.3
 RUN apk add curl-dev socat
 COPY nc-web.sh /
-COPY --from=0 /application/bin/app /app
+COPY --from=0 /application/bin/* /
 
-CMD ["/app"]
+CMD ["/binance"]

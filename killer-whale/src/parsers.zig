@@ -7,7 +7,7 @@ const ParsedAnnounce = struct { id: u32, title: []const u8, ts: i64 };
 // detects if title contains listing or delisting
 // returns confidence level
 // 0 means not found
-pub fn listing_delisting(title: []const u8) u8 {
+pub fn isAnnounceImportant(title: []const u8) u8 {
     const has_list = greater_than_zero(std.ascii.indexOfIgnoreCase(title, " will list"));
     const has_delist = greater_than_zero(std.ascii.indexOfIgnoreCase(title, " will delist"));
     const has_binance: u8 = if (std.ascii.startsWithIgnoreCase(title, "binance")) 1 else 0;
@@ -25,27 +25,11 @@ inline fn greater_than_zero(value: ?usize) u8 {
 }
 
 test "detect delisting" {
-    try expect(listing_delisting("Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26") == 3);
+    try expect(isAnnounceImportant("Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26") == 3);
 
-    try expect(listing_delisting("Binance Announced the First Batch of Vote to Delist Results and Will Delist BADGER, BAL, BETA, CREAM, CTXC, ELF, FIRO, HARD, NULS, PROS, SNT, TROY, UFT, VIDT on 2025-04-16") == 4);
-    try expect(listing_delisting("Binance Announced the First Batch of Vote to Delist Results and Will Delist BADGER, BAL, BETA, CREAM, CTXC, ELF, FIRO, HARD, NULS, PROS, SNT, TROY, UFT, VIDT on 2025-04-16") == 4);
-    try expect(listing_delisting("Binance Announced the First Batch of Vote to List Results and Will List Mubarak (MUBARAK), CZ'S Dog (BROCCOLI714), Tutorial (TUT), and Banana For Scale (BANANAS31) With Seed Tags Applied") == 3);
-}
-
-pub fn extractAnnounceContent(fetchRes: *const binance.FetchResult) ?ParsedAnnounce {
-    const id = fetchRes.extractID() orelse return null;
-    const title = fetchRes.extractTitle() orelse return null;
-    const date = fetchRes.extractReleaseDate() orelse return null;
-    return .{ .id = id, .title = title, .ts = date };
-}
-
-test "extract announce from response" {
-    const response = "{\"code\":\"000000\",\"message\":null,\"messageDetail\":null,\"data\":{\"catalogs\":[{\"catalogId\":161,\"parentCatalogId\":null,\"icon\":\"https://public.bnbstatic.com/image/cms/content/body/202202/ad416a7598c8327ee59a6052c001c9b9.png\",\"catalogName\":\"Delisting\",\"description\":null,\"catalogType\":1,\"total\":252,\"articles\":[{\"id\":207063,\"code\":\"e2fcd2c945654c8d832395335429403e\",\"title\":\"Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26\",\"type\":1,\"releaseDate\":1723446011329},{\"id\":206836,\"code\":\"e633a048a38a44c29828a441e4c4dac2\",\"title\":\"Notice of Removal of Spot Trading Pairs - 2024-08-02\",\"type\":1,\"releaseDate\":1722409208662}],\"catalogs\":[]}]},\"success\":true}";
-    const fetch = binance.FetchResult{ .body = response, .url = "" };
-    const result = extractAnnounceContent(&fetch) orelse unreachable;
-    try expect(result.id == 207063);
-    try expect(result.ts == 1723446011329);
-    try expect(std.ascii.eqlIgnoreCase(result.title, "Binance Will Delist CVP, EPX, FOR, LOOM, REEF, VGX on 2024-08-26"));
+    try expect(isAnnounceImportant("Binance Announced the First Batch of Vote to Delist Results and Will Delist BADGER, BAL, BETA, CREAM, CTXC, ELF, FIRO, HARD, NULS, PROS, SNT, TROY, UFT, VIDT on 2025-04-16") == 4);
+    try expect(isAnnounceImportant("Binance Announced the First Batch of Vote to Delist Results and Will Delist BADGER, BAL, BETA, CREAM, CTXC, ELF, FIRO, HARD, NULS, PROS, SNT, TROY, UFT, VIDT on 2025-04-16") == 4);
+    try expect(isAnnounceImportant("Binance Announced the First Batch of Vote to List Results and Will List Mubarak (MUBARAK), CZ'S Dog (BROCCOLI714), Tutorial (TUT), and Banana For Scale (BANANAS31) With Seed Tags Applied") == 3);
 }
 
 pub fn extractCoins(allocator: std.mem.Allocator, text: []const u8) ![]const []const u8 {

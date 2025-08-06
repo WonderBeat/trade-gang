@@ -7,13 +7,26 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const app_name = b.option([]const u8, "app", "Application to build") orelse "binance";
+    const output_name = b.option([]const u8, "output", "output file name");
+    const verbose = b.option([]const u8, "verbose", "verbose mode") != null;
+    const options = b.addOptions();
+    options.addOption(bool, "verbose", verbose);
+
     const exe = b.addExecutable(.{
-        .name = "app",
-        .root_source_file = b.path("src/main.zig"),
+        .name = output_name orelse app_name,
+        .root_source_file = b.path(try getMainFile(app_name)),
         .target = target,
         .optimize = optimize,
     });
+    exe.root_module.addOptions("config", options);
     exe.addIncludePath(b.path("."));
+
+    const fastfilter_dep = b.dependency("fastfilter", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("fastfilter", fastfilter_dep.module("fastfilter"));
 
     const simdjzon_dep = b.dependency("simdjzon", .{ .target = target, .optimize = optimize });
     exe.root_module.addImport("simdjzon", simdjzon_dep.module("simdjzon"));
@@ -81,9 +94,12 @@ pub fn build(b: *std.Build) !void {
     b.installArtifact(exe);
 
     const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path(try getMainFile(app_name)),
         .target = target,
     });
+
+    unit_tests.root_module.addOptions("config", options);
+
     unit_tests.root_module.addImport("yazap", yazap.module("yazap"));
     unit_tests.root_module.addImport("curl", dep_curl.module("curl"));
     unit_tests.root_module.addImport("zeit", dep_zeit.module("zeit"));
@@ -91,6 +107,7 @@ pub fn build(b: *std.Build) !void {
     unit_tests.root_module.addImport("mqttz", mqttz_dep.module("mqttz"));
     unit_tests.root_module.addImport("metrics", metrics_dep.module("metrics"));
     unit_tests.root_module.addImport("simdjzon", simdjzon_dep.module("simdjzon"));
+    unit_tests.root_module.addImport("fastfilter", fastfilter_dep.module("fastfilter"));
     unit_tests.linkSystemLibrary("curl");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
@@ -110,6 +127,13 @@ pub fn build(b: *std.Build) !void {
     });
 
     gen_proto.dependOn(&protoc_step.step);
+}
+
+fn getMainFile(app_name: []const u8) ![]const u8 {
+    return switch (std.mem.eql(u8, app_name, "upbit")) {
+        true => "src/upbit.zig",
+        false => "src/main.zig",
+    };
 }
 
 pub fn dir_exists(directory: []const u8) bool {

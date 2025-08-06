@@ -1,6 +1,10 @@
 const std = @import("std");
 const curl = @import("curl");
+const buildConfig = @import("config");
 const proxy = @import("proxy-manager.zig");
+const c = @cImport({
+    @cInclude("stdlib.h");
+});
 
 pub const Buffer = std.ArrayList(u8);
 
@@ -13,17 +17,21 @@ pub const Curl = struct {
     headers: curl.Easy.Headers,
     proxyManager: proxy.ProxyManager,
     proxyDownloadUrl: ?[:0]const u8 = null,
+    receiveBuffer: Buffer,
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
         const ca_bundle = try curl.allocCABundle(allocator);
         errdefer ca_bundle.deinit();
-        //const hostname = std.posix.getenv("HOSTNAME") orelse "UNDEF";
+        const timeout = try std.fmt.parseInt(u32, std.posix.getenv("QUERY_TIMEOUT") orelse "2000", 0);
+
         const easy = try curl.Easy.init(allocator, .{
             .default_user_agent = "Mozilla/5.0 Firefox/135.0", //
             .ca_bundle = ca_bundle,
-            .default_timeout_ms = 3_100,
+            .default_timeout_ms = timeout,
         });
-        //try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_VERBOSE, @as(c_long, 1)));
+        if (buildConfig.verbose) {
+            try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_VERBOSE, @as(c_long, 1)));
+        }
         try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_ACCEPT_ENCODING, "")); // accept all possible by curl
         try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_TCP_KEEPALIVE, @as(c_long, 1)));
         try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_TCP_KEEPIDLE, @as(c_long, 6)));
@@ -56,39 +64,46 @@ pub const Curl = struct {
             .easy = easy,
             .headers = headers,
             .proxyManager = proxy.ProxyManager.init(allocator),
+            .receiveBuffer = try Buffer.initCapacity(self.allocator, 12000),
         };
-        try self.setup_headers(0, 0);
+        try self.initHeaders(.{});
         return self;
     }
 
-    pub fn set_proxy(self: *Self, proxyAddr: [:0]const u8) !void {
+    pub fn setProxy(self: *Self, proxyAddr: [:0]const u8) !void {
         try checkCode(curl.libcurl.curl_easy_setopt(self.easy.handle, curl.libcurl.CURLOPT_PROXY, proxyAddr.ptr));
     }
 
-    pub fn set_trim_body(self: *Self, trim_from: u32, trim_to: u32) !void {
-        try self.setup_headers(trim_from, trim_to);
+    pub fn initHeaders(self: *Self, options: struct {
+        trimFrom: ?usize = null,
+        trimTo: ?usize = null,
+        etag: ?[]const u8 = null,
+    }) !void {
+        self.headers.deinit();
+        self.headers = try self.easy.createHeaders();
+        errdefer self.headers.deinit();
+        try self.headers.add("Authorization", "Basic dXN");
+        try self.headers.add("Accept", "*/*");
+        try self.headers.add("Accep-Language", "en-US,en;q=0.1");
+        if (options.trimFrom) |from| {
+            if (options.trimTo) |to| {
+                try self.setTrimBody(from, to);
+            }
+        }
+        if (options.etag) |etag| {
+            try self.setEtag(etag);
+        }
+        try self.easy.setHeaders(self.headers);
     }
 
-    fn setup_headers(self: *Self, trim_from: u32, trim_to: u32) !void {
-        self.headers.deinit();
-        const headers = blk: {
-            var h = try self.easy.createHeaders();
-            errdefer h.deinit();
-            //try h.add("Host", "www.binance.com");
-            try h.add("Authorization", "Basic dXN");
-            try h.add("Accept", "*/*");
-            //try h.add("Proxy-Connection", "keep-alive");
-            //try h.add("lang", "en");
-            try h.add("Accep-Language", "en-US,en;q=0.1");
-            if (trim_to > 0) {
-                var buf: [20]u8 = undefined;
-                const size_str = try std.fmt.bufPrint(&buf, "bytes={d}-{d}", .{ trim_from, trim_to });
-                try h.add("Range", size_str);
-            }
-            break :blk h;
-        };
-        errdefer headers.deinit();
-        try self.easy.setHeaders(headers);
+    fn setTrimBody(self: *Self, trim_from: usize, trim_to: usize) !void {
+        var buf: [20]u8 = undefined;
+        const size_str = try std.fmt.bufPrint(&buf, "bytes={d}-{d}", .{ trim_from, trim_to });
+        try self.headers.add("Range", size_str);
+    }
+
+    fn setEtag(self: *Self, etag: []const u8) !void {
+        try self.headers.add("If-None-Match", etag);
     }
 
     pub fn deinit(self: *Self) void {
@@ -96,6 +111,7 @@ pub const Curl = struct {
         self.headers.deinit();
         self.ca_bundle.deinit();
         self.proxyManager.deinit();
+        self.receiveBuffer.deinit();
         self.allocator.destroy(self);
     }
 
@@ -106,9 +122,6 @@ pub const Curl = struct {
     pub fn dropCurrentProxy(self: *Self) !usize {
         if (!self.proxyManager.isEmpty()) {
             self.proxyManager.dropCurrent();
-            if (self.proxyManager.getCurrentProxy()) |url| {
-                try self.set_proxy(url);
-            }
         }
         return self.proxyManager.size();
     }
@@ -124,7 +137,7 @@ pub const Curl = struct {
             }
         }
         if (self.proxyManager.getNextProxy()) |proxy_url| {
-            try self.set_proxy(proxy_url);
+            try self.setProxy(proxy_url);
         }
     }
 
@@ -139,12 +152,33 @@ pub const Curl = struct {
         if (res != curl.libcurl.CURLE_OK) {
             return null;
         }
-        return .{ .pretransfer_time = @intCast(@divFloor(pretransfer, @as(c_long, 1000))), .total_time = @intCast(@divFloor(total_time, @as(c_long, 1000))) };
+        return .{
+            .pretransfer_time = @intCast(@divFloor(pretransfer, @as(c_long, 1000))),
+            .total_time = @intCast(@divFloor(total_time, @as(c_long, 1000))),
+        };
+    }
+
+    // resp is valid till next request
+    // do not deinit response
+    pub fn get(
+        self: *Self,
+        url: [:0]const u8,
+        //        func: *const fn (*Buffer) i32,
+    ) !curl.Easy.Response {
+        self.receiveBuffer.clearRetainingCapacity();
+        const client = &self.easy;
+        try client.setWritefunction(curl.bufferWriteCallback);
+        try client.setWritedata(&self.receiveBuffer);
+        try client.setUrl(url);
+        var resp = try perform(self.allocator, client);
+        resp.body = self.receiveBuffer;
+        return resp;
     }
 };
 
+// default perform function has no debug info
 pub fn get(allocator: std.mem.Allocator, client: *const curl.Easy, url: [:0]const u8) !curl.Easy.Response {
-    var buf = Buffer.init(allocator);
+    var buf = try Buffer.initCapacity(allocator, 7000);
     try client.setWritefunction(curl.bufferWriteCallback);
     try client.setWritedata(&buf);
     try client.setUrl(url);
@@ -153,7 +187,7 @@ pub fn get(allocator: std.mem.Allocator, client: *const curl.Easy, url: [:0]cons
     return resp;
 }
 
-pub fn perform(allocator: std.mem.Allocator, client: *const curl.Easy) !curl.Easy.Response {
+fn perform(allocator: std.mem.Allocator, client: *const curl.Easy) !curl.Easy.Response {
     try client.setCommonOpts();
     var status_code: c_long = 0;
     var code = curl.libcurl.curl_easy_perform(client.handle);

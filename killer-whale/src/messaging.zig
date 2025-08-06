@@ -3,21 +3,25 @@ const protos = @import("proto/protos.pb.zig");
 const protobuf = @import("protobuf");
 const os = std.os;
 const posix = std.posix;
+const bin = @import("binance.zig");
+const parse = @import("parsers.zig");
 
-pub fn send_announce(allocator: std.mem.Allocator, address: std.net.Address, tokens: *const []const []const u8, ts: i64, catalog: u16, title: *const []const u8, call_to_action: bool) !usize {
+pub fn sendAnnounce(allocator: std.mem.Allocator, address: std.net.Address, announce: *const bin.Announce) !usize {
+    const coins = try parse.extractCoins(allocator, announce.title);
+    defer allocator.free(coins);
+    const isImportant = parse.isAnnounceImportant(announce.title) >= 3;
     var array = std.ArrayList(protobuf.ManagedString).init(allocator);
     defer array.deinit();
-
-    for (tokens.*) |token| {
+    for (coins) |token| {
         try array.append(protobuf.ManagedString.managed(token));
     }
-    const managed_title = protobuf.ManagedString.managed(title.*[0..@min(title.len, 40)]);
-    const announce = protos.Announcement{
-        .ts = @intCast(ts), //
+    const managed_title = protobuf.ManagedString.managed(announce.title[0..@min(announce.title.len, 40)]);
+    const announceProto = protos.Announcement{
+        .ts = @intCast(announce.releaseDate), //
         .tokens = array,
-        .catalog = catalog,
+        .catalog = announce.catalogId,
         .title = managed_title,
-        .call_to_action = call_to_action,
+        .call_to_action = isImportant,
     };
 
     const tpe: u32 = posix.SOCK.DGRAM;
@@ -26,7 +30,7 @@ pub fn send_announce(allocator: std.mem.Allocator, address: std.net.Address, tok
     defer posix.close(socket);
     try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
-    const byteArray = try announce.encode(allocator);
+    const byteArray = try announceProto.encode(allocator);
     defer allocator.free(byteArray);
 
     const send_bytes = try posix.send(socket, byteArray, 0);

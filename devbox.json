@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
   "packages": [
+    "nodejs@24.2.0",
     "zig@latest",
     "odo@latest",
     "bun@latest",
@@ -9,19 +10,23 @@
     "uv@latest",
     "protobuf@latest",
     "docker-compose@latest",
-    "kubectl@latest"
+    "kubectl@latest",
+    "hurl@latest",
   ],
+  "env": {
+    "DEVBOX_COREPACK_ENABLED": "true",
+  },
   "shell": {
     "init_hook": [
       "export LDFLAGS=\"-L/opt/homebrew/opt/curl/lib\"",
       "export CPPFLAGS=\"-I/opt/homebrew/opt/curl/include\"",
       "export NIX_LDFLAGS=\"$NIX_LDFLAGS $LDFLAGS\"",
-      "echo 'Welcome to devbox!' > /dev/null"
+      //  "npm install @google/gemini-cli"
     ],
     "scripts": {
       "test": [
-        "echo \"Error: no test specified\" && exit 1"
-      ]
-    }
-  }
+        "echo \"Error: no test specified\" && exit 1",
+      ],
+    },
+  },
 }

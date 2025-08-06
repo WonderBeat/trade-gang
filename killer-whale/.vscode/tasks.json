@@ -4,12 +4,17 @@
     {
       "label": "Build",
       "type": "shell",
-      "command": "zig build",
+      "command": "zig build --prominent-compile-errors",
       "group": "test",
       "presentation": {
         //"reveal": "always"
         //  "panel": "new"
       }
+    },
+    {
+      "label": "Build UPBIT",
+      "type": "shell",
+      "command": "zig build -Dapp=upbit --prominent-compile-errors"
     },
     {
       "label": "Build Tests",

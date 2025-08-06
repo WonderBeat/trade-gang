@@ -22,7 +22,7 @@ pub const ProxyManager = struct {
         self.proxies.deinit();
     }
 
-    pub fn isEmpty(self: *ProxyManager) bool {
+    pub fn isEmpty(self: *const ProxyManager) bool {
         return self.proxies.items.len == 0;
     }
 
@@ -70,7 +70,7 @@ pub const ProxyManager = struct {
         return self.proxies.items.len;
     }
 
-    pub fn size(self: *ProxyManager) usize {
+    pub fn size(self: *const ProxyManager) usize {
         return self.proxies.items.len;
     }
 
@@ -80,7 +80,7 @@ pub const ProxyManager = struct {
         return self.proxies.items[self.current_index];
     }
 
-    pub fn getCurrentProxy(self: *ProxyManager) ?[:0]const u8 {
+    pub fn getCurrentProxy(self: *const ProxyManager) ?[:0]const u8 {
         if (self.proxies.items.len == 0) return null;
         return self.proxies.items[self.current_index];
     }
@@ -88,7 +88,11 @@ pub const ProxyManager = struct {
     pub fn dropCurrent(self: *ProxyManager) void {
         if (self.proxies.items.len == 0) return;
         self.allocator.free(self.proxies.swapRemove(self.current_index));
-        self.current_index = self.current_index % self.proxies.items.len;
+        if (self.proxies.items.len == 0) {
+            self.current_index = 0;
+        } else {
+            self.current_index = self.current_index % self.proxies.items.len;
+        }
     }
 };
 

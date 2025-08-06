@@ -9,6 +9,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@google/gemini-cli": "^0.1.2",
     "bloom-filters": "^3.0.4",
     "effect": "^3.13.2",
     "fast-xml-parser": "^5.0.8"

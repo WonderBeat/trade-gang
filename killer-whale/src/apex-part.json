@@ -1,0 +1,26 @@
+{
+  "code": "000000",
+  "message": null,
+  "messageDetail": null,
+  "data": {
+    "catalogs": [
+      {
+        "catalogId": 161,
+        "parentCatalogId": null,
+        "icon": "https://public.bnbstatic.com/image/cms/content/body/202505/a6322b2e7d81faf3f65a6d14c372995e.png",
+        "catalogName": "Delisting",
+        "description": null,
+        "catalogType": 1,
+        "total": 266,
+        "articles": [
+          {
+            "id": 239906,
+            "code": "173b2a63c03141009029407ecfebd14a",
+            "title": "Binance Will Delist ALPHA, BSW, KMD, LEVER, LTO on 2025-07-04",
+            "type": 1,
+            "releaseDate": 1750921209887
+          },
+          {
+            "id": 239847,
+            "code": "a37e284394114daf8e0045360dd129eb",
+            "title": "Notice of Removal of Spot Trading....

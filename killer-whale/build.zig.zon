@@ -50,6 +50,10 @@
             .url = "git+https://github.com/travisstaloch/simdjzon#62ca9484520a088315f3b123605d2cf108b6abf1",
             .hash = "simdjzon-0.0.1-7uNSgGddBQBshResiWQfzBc8Mt2w6WUDlsrF3HDJpWwL",
         },
+        .fastfilter = .{
+            .url = "git+https://github.com/hexops/fastfilter#7081b6d8c0470c4e418c0cfed6eeadf89d0cc8a8",
+            .hash = "N-V-__8AAHWaAQBJ9q07Yhbuf-EvCN1hvYXF5BgKe5-aHcg2",
+        },
     },
     .paths = .{
         "build.zig",

@@ -1,23 +1,27 @@
 const std = @import("std");
 const builtin = @import("builtin");
-
 const yazap = @import("yazap");
 const App = yazap.App;
 const Arg = yazap.Arg;
 
+const punch = @import("punch.zig");
 const bin = @import("binance.zig");
 const json = @import("json.zig");
 const messaging = @import("messaging.zig");
 const mqtt = @import("mqtt.zig");
 const parse = @import("parsers.zig");
 const wcurl = @import("curl.zig");
-const prometheus = @import("prometheus.zig");
+const curl = @import("curl");
+const metrics = @import("prometheus.zig");
 const proxy = @import("proxy-manager.zig");
+const fastfilter = @import("fastfilter");
+
+//for simdjzon
+pub const read_buf_cap = 4096;
 
 const BINANCE_TOPIC = if (builtin.mode == .Debug) "binance-test" else "binance";
 
 //const yaml = @import("ymlz");
-//const zeit = @import("zeit");
 pub const std_options = std.Options{
     .log_level = switch (builtin.mode) {
         .Debug => .debug,
@@ -43,7 +47,7 @@ pub fn main() !void {
         };
     };
     if (!is_debug) {
-        try prometheus.initializeMetrics(.{ .prefix = "killa_" });
+        try metrics.initializeMetrics(.{ .prefix = "killa_" });
     }
 
     defer if (is_debug) {
@@ -54,11 +58,11 @@ pub fn main() !void {
         defer cmd_parser.deinit();
         var message = cmd_parser.createCommand("message", "send announce and exit");
         try message.addArg(Arg.singleValueOption("address", 'a', "destination address"));
-        var punch = cmd_parser.createCommand("punch", "Punch and exit");
-        try punch.addArg(Arg.singleValueOption("id", 'i', "announce ID"));
-        try punch.addArg(Arg.singleValueOption("catalog", 'c', "catalog ID"));
-        try punch.addArg(Arg.singleValueOption("anonymizer", 'a', "anonymizer address"));
-        try punch.addArg(Arg.singleValueOption("tld", 't', "TLD"));
+        var punchCmd = cmd_parser.createCommand("punch", "Punch and exit");
+        try punchCmd.addArg(Arg.singleValueOption("id", 'i', "announce ID"));
+        try punchCmd.addArg(Arg.singleValueOption("catalog", 'c', "catalog ID"));
+        try punchCmd.addArg(Arg.singleValueOption("anonymizer", 'a', "anonymizer address"));
+        try punchCmd.addArg(Arg.singleValueOption("tld", 't', "TLD"));
         var avalance = cmd_parser.createCommand("avalance", "avalance and exit");
         try avalance.addArg(Arg.singleValueOption("mqtt", 'm', "mqtt address"));
         try avalance.addArg(Arg.singleValueOption("catalog", 'c', "catalog ID"));
@@ -66,7 +70,7 @@ pub fn main() !void {
         try avalance.addArg(Arg.singleValueOption("tld", 't', "TLD"));
         var root = cmd_parser.rootCommand();
         try root.addArg(Arg.singleValueOption("catalog", 'c', "catalog ID"));
-        try root.addSubcommand(punch);
+        try root.addSubcommand(punchCmd);
         try root.addSubcommand(message);
         try root.addSubcommand(avalance);
         const matches = try cmd_parser.parseProcess();
@@ -77,7 +81,8 @@ pub fn main() !void {
             const tokens = try parse.extractCoins(allocator, title);
             defer allocator.free(tokens);
             const ip = try resolve_address(address);
-            const bytes_sent = try messaging.send_announce(allocator, ip, &tokens, 77777, 69, &"LOVE YOU", false);
+            const announce = bin.Announce{ .allocator = allocator, .url = address, .total = 0, .releaseDate = 0, .catalogId = 0, .title = title, .id = 0 };
+            const bytes_sent = try messaging.sendAnnounce(allocator, ip, &announce);
             std.log.debug("Msg sent {d} bytes", .{bytes_sent});
             return;
         } else if (matches.subcommandMatches("punch")) |punch_cmd| {
@@ -88,9 +93,9 @@ pub fn main() !void {
             const curl_module = try wcurl.Curl.init(allocator);
             defer curl_module.deinit();
 
-            const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = 0, .lastSeenTotal = id };
-            const success = try punchNotify(allocator, curl_module, try resolve_address("127.0.0.1:8888"), &config);
-            std.log.info("Punched with result {s}...", .{if (success) "success" else "failure"});
+            const config = punch.PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = 0, .lastSeenTotal = id };
+            const result = try punch.punchNotify(allocator, curl_module, try resolve_address("127.0.0.1:8888"), &config);
+            std.log.info("Punched with result {s}...", .{if (result) "success" else "failure"});
             return;
         } else if (matches.subcommandMatches("avalance")) |avalance_cmd| {
             const mqtt_address = avalance_cmd.getSingleValue("mqtt") orelse return;
@@ -125,7 +130,6 @@ pub fn main() !void {
         break :blk seed;
     });
 
-    var latest_total: u32 = 0;
     const curl_module = try wcurl.Curl.init(allocator);
     defer curl_module.deinit();
     const client = try mqtt.Mqtt.init(allocator, mqtt_address);
@@ -133,7 +137,6 @@ pub fn main() !void {
     defer {
         client.deinit();
     }
-    const easy = curl_module.easy;
     if (anonymizer == null) {
         if (std.posix.getenv("FETCH_URL")) |url| {
             curl_module.setProxyDownloadUrl(url);
@@ -144,139 +147,105 @@ pub fn main() !void {
     if (std.posix.getenv("PASSIVE")) |_| {
         std.log.info("Passive mode ON: mothership {}, mqtt {s}", .{ send_announce_address, mqtt_address });
         for (0..1111) |_| {
-            if (try passive_punch_mode(allocator, client, curl_module, 14000, anonymizer, 1, send_announce_address, null)) |_| {
+            if (try passive_punch_mode(allocator, client, curl_module, 10_000, anonymizer, 1, send_announce_address, parse.Tld.Me)) |_| {
                 std.time.sleep(std.time.ns_per_s * 30); // cooldown
                 return;
             }
             _ = try client.ping();
         }
+        std.log.info("Passive mode finished", .{});
         return;
     }
-    const iterations = if (is_debug) 3 else (20 + prng.random().intRangeAtMost(usize, 0, 30));
+    const iterations = if (is_debug) 6 else (20 + prng.random().intRangeAtMost(usize, 0, 30));
     const catalogConfig = switch (catalog) {
         161 => bin.catalogPages.delisting,
         48 => bin.catalogPages.listing,
         else => bin.catalogPages.default,
     };
+    var alreadySeenFilter = try fastfilter.BinaryFuse(u32).init(allocator, 50);
+    defer alreadySeenFilter.deinit(allocator);
+    var initialized: bool = false;
     for (0..iterations) |_| {
         const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 999999);
-        try curl_module.set_trim_body(0, 400);
-        const result: ?u32 = found: {
-            //var config = bin.ChangeWaitingParams{ .catalog_id = catalog, .tld = tld, .seed = seed, .anonymizer = anonymizer };
-
-            var config = bin.FetchSingleParams{ .catalogId = catalog, .tld = tld, .seed = seed, .anonymizer = anonymizer };
+        //try curl_module.set_trim_body(0, 400);
+        const result: ?bin.Announce = found: {
+            var config = bin.FetchParams{
+                .catalogId = catalog,
+                .tld = tld,
+                .seed = seed,
+                .anonymizer = anonymizer,
+            };
             for (1..iterations) |iter| {
-                prometheus.latest(latest_total);
-                var time_spent_query = std.time.milliTimestamp();
+                var timeSpentIoMs = std.time.milliTimestamp();
                 config.seed = seed + iter;
-                config.page = catalogConfig.atOffset(config.seed);
-                const fetchResult = bin.fetchPage(allocator, &easy, &config) catch |errz| none: {
-                    const time_spent_err = std.time.milliTimestamp() - time_spent_query;
-                    std.log.err("F {d}: {s} with {?s} in {d}ms", .{ latest_total, @errorName(errz), curl_module.proxyManager.getCurrentProxy(), time_spent_err });
-                    prometheus.err();
-                    if (errz == wcurl.CurlError.OperationTimedout) {
-                        prometheus.timeout();
-                    } else if (errz == wcurl.CurlError.SSLConnectError or errz == wcurl.CurlError.SSLCertProblem) {
-                        prometheus.sslError();
-                    }
-                    break :none null;
+                //config.page = catalogConfig.atOffset(config.seed);
+                //Global catalog works only for 1 page
+                config.page.offset = 1;
+                config.page.size = catalogConfig.pages[config.seed % catalogConfig.pages.len].size;
+                var success = true;
+                const unseen = fetchUpdate(allocator, curl_module, &config, &alreadySeenFilter) catch |err| notFound: {
+                    std.log.debug("fetchUpdate failed: {s}", .{@errorName(err)});
+                    success = false;
+                    metrics.err();
+                    break :notFound null;
                 };
-                const success = fetchResult != null;
-                time_spent_query = std.time.milliTimestamp() - time_spent_query;
                 if (success) {
-                    prometheus.hit();
-                    if (curl_module.latest_query_metrics()) |metrics| {
-                        const execution_time_ms = metrics.total_time - metrics.pretransfer_time;
-                        prometheus.latency(@intCast(execution_time_ms));
+                    std.log.debug("fetchUpdate success: {s}", .{if (unseen != null) "found" else "not found"});
+                    metrics.hit();
+                }
+                if (curl_module.latest_query_metrics()) |cMetrics| {
+                    const execution_time_ms = cMetrics.total_time - cMetrics.pretransfer_time;
+                    metrics.latency(@intCast(execution_time_ms));
+                }
+                if (unseen) |fetched| {
+                    defer fetched.deinit();
+                    if (initialized) { // first update might be triggered by empty bin filter
+                        std.debug.assert(config.page.offset == 1);
+                        std.log.info("Catalog update signal {d}, for {s} / {?s}", .{ fetched.total, fetched.url, curl_module.proxyManager.getCurrentProxy() });
+                        const ts = std.time.timestamp();
+                        std.log.info("Timestamps: ours {d} announcement {d}, diff: {d}", .{ ts, fetched.releaseDate, ts - @divFloor(fetched.releaseDate, 1000) });
+                        if (fetched.catalogId == catalog) {
+                            _ = messaging.sendAnnounce(allocator, send_announce_address, &fetched) catch 0;
+                            break :found fetched;
+                        } else {
+                            std.log.info("Catalog mismatch {d} {d}", .{ fetched.catalogId, catalog });
+                        }
+                    } else {
+                        initialized = true;
+                        std.log.info("Catalog filter initialized", .{});
                     }
+                }
+                // if (iter % 5 == 0) {
+                //     try client.ping();
+                // }
+                if (iter % 13 == 0) {
+                    const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
+                    defer file.close();
+                    try metrics.writeMetrics(file.writer());
+                }
+                if (success) {
                     try curl_module.exchangeProxy();
                 } else {
-                    if (try curl_module.dropCurrentProxy() == 0) {
+                    const proxiesCount = try curl_module.dropCurrentProxy();
+                    if (proxiesCount == 0) {
                         try curl_module.exchangeProxy();
                     }
                 }
-                if (fetchResult) |fetched| {
-                    defer fetched.clear(allocator);
-                    if (fetched.extractTotal()) |fetched_total| {
-                        if (fetched_total > latest_total) {
-                            if (latest_total != 0) {
-                                std.log.info("Catalog update signal {d}, for {s} / {?s}", .{ fetched_total, fetched.url, curl_module.proxyManager.getCurrentProxy() });
-                                for (0..5) |nextPageIndex| {
-                                    config.page = catalogConfig.atOffset(config.seed + nextPageIndex);
-                                    const nextPage = bin.fetchPage(allocator, &easy, &config) catch null;
-                                    if (nextPage) |np| {
-                                        defer np.clear(allocator);
-                                        std.log.info("Next page total: {?d} for {s} / {?s}", .{ np.extractTotal(), np.url, curl_module.proxyManager.getCurrentProxy() });
-                                    } else {
-                                        try curl_module.exchangeProxy();
-                                    }
-                                }
-                                break :found fetched_total;
-                            }
-                            latest_total = fetched_total;
-                            std.log.debug("Total set to {d}", .{fetched_total});
-                        }
-                    } else {
-                        std.log.err("Catalog update total not found {s}", .{fetched.body});
-                    }
-                }
-                if (iter % 5 == 0) {
-                    try client.ping();
-                }
-                if (iter % 13 == 0) {
-                    std.log.info("latest total {d}", .{latest_total});
-                    const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
-                    defer file.close();
-                    try prometheus.writeMetrics(file.writer());
-                }
-                const sleep_max_ms: i32 = if (success) 1500 else 200;
-                const sleep_remaning: i32 = @intCast(@max(100, sleep_max_ms - time_spent_query)); // min 50ms sleep
-
-                if (try passive_punch_mode(
-                    allocator,
-                    client,
-                    curl_module,
-                    sleep_remaning,
-                    anonymizer,
-                    seed,
-                    send_announce_address,
-                    parse.Tld.from_string(tld).?,
-                )) |update| {
-                    if (update.catalog == catalog) {
-                        latest_total = update.total;
-                    }
-                    try client.ping();
-                    std.time.sleep(std.time.ns_per_s * 15); // cooldown
-                    try client.ping();
-                }
+                timeSpentIoMs = std.time.milliTimestamp() - timeSpentIoMs;
+                const sleepRemaningMs: u64 = @intCast(@max(100, 2000 - timeSpentIoMs));
+                std.time.sleep(std.time.ns_per_ms * sleepRemaningMs); // cooldown
             }
             break :found null;
         };
 
-        if (result) |new_total| {
-            send_mqtt_alert(client, catalog, new_total, parse.Tld.from_string(tld).?) catch |errz| {
-                std.log.warn("Mqtt send error {s}", .{@errorName(errz)});
-            };
-            const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed, .lastSeenTotal = new_total };
-            const success = try punchNotify(allocator, curl_module, send_announce_address, &config);
-            if (success) {
-                std.log.info("Update found as a result of a signal with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
-            }
-            latest_total = new_total;
+        if (result == null) {
+            std.log.info("Update NOT found after direct punching", .{});
+        } else {
+            std.log.info("Update found as a result of a signal with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
+            std.time.sleep(std.time.ns_per_min * 5);
         }
-
-        try client.ping();
+        //try client.ping();
         std.time.sleep(std.time.ns_per_s * 1);
-    }
-    if (latest_total == 0) { // we have nothing to hunt for
-        return;
-    }
-    std.log.info("Bruteforce something after {d}", .{latest_total});
-    const seed = std.Random.intRangeAtMost(prng.random(), usize, 0, 999999);
-    const config = PunchParams{ .catalogId = catalog, .tld = tld, .anonymizer = anonymizer, .seed = seed, .sleep = 1200, .iterations = if (is_debug) 5 else @intCast(40 + seed % 20), .lastSeenTotal = latest_total };
-    const success = try punchNotify(allocator, curl_module, send_announce_address, &config);
-    if (success) {
-        std.log.info("Update was found with bruteforce with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
     }
 }
 
@@ -290,28 +259,33 @@ fn passive_punch_mode(
     allocator: std.mem.Allocator,
     mqtt_cli: *mqtt.Mqtt,
     curl_cli: *wcurl.Curl,
-    timeout: i32,
+    timeoutMs: i32,
     anonymizer: ?[]const u8,
     seed: usize,
     send_announce_address: std.net.Address,
     overwrite_tld: ?parse.Tld,
 ) !?struct { catalog: u16, total: u32 } {
-    if (try wait_for_message(allocator, mqtt_cli, timeout)) |alert| {
+    if (try wait_for_message(allocator, mqtt_cli, timeoutMs)) |alert| {
         const alert_tld = (overwrite_tld orelse alert.tld).to_string();
         std.log.info("Cooperative punching activated {d}:{d}:{s}", .{ alert.catalog, alert.total, alert_tld });
-        const conf = PunchParams{
+        const conf = punch.PunchParams{
             .catalogId = alert.catalog,
             .tld = alert_tld,
             .seed = seed,
             .anonymizer = anonymizer,
             .lastSeenTotal = alert.total,
         };
-        _ = try punchNotify(
+        const success = try punch.punchNotify(
             allocator,
             curl_cli,
             send_announce_address,
             &conf,
         );
+        if (success) {
+            std.log.info("Update was found in passive punch mode: {?s}", .{curl_cli.proxyManager.getCurrentProxy()});
+        } else {
+            std.log.info("Update NOT found in passive punch mode", .{});
+        }
         return .{ .catalog = alert.catalog, .total = alert.total };
     }
     return null;
@@ -320,9 +294,9 @@ fn passive_punch_mode(
 fn wait_for_message(
     allocator: std.mem.Allocator,
     mqtt_cli: *mqtt.Mqtt,
-    timeout: i32,
+    timeoutMs: i32,
 ) !?struct { catalog: u16, total: u32, tld: parse.Tld } {
-    if (try mqtt_cli.receive_string(timeout)) |alert| {
+    if (try mqtt_cli.receive_string(timeoutMs)) |alert| {
         defer allocator.free(alert);
         var iterator = std.mem.splitScalar(u8, alert, '|');
         const alert_catalog = try std.fmt.parseInt(u16, iterator.first(), 0);
@@ -333,105 +307,51 @@ fn wait_for_message(
     return null;
 }
 
-const PunchParams = struct {
-    catalogId: u16,
-    tld: []const u8,
-    seed: usize,
-    anonymizer: ?[]const u8,
-    iterations: u32 = 500,
-    sleep: u32 = 100,
-    lastSeenTotal: u32,
-    proxyManager: ?proxy.ProxyManager = null,
-};
+fn filterLastUnseenInList(articles: *const std.ArrayList(bin.Announce), unseenFilter: *fastfilter.BinaryFuse(u32)) !?bin.Announce {
+    var result: ?bin.Announce = null;
+    var keysToAdd: [10]u64 = std.mem.zeroes([10]u64);
+    var keysIndex: u32 = 0;
+    for (articles.items) |article| {
+        if (unseenFilter.contain(article.id)) {
+            std.log.debug("Skipping already seen: {d}", .{article.id});
+        } else {
+            result = article;
+            keysToAdd[keysIndex] = article.id;
+            keysIndex += 1;
+        }
+    }
+    if (keysIndex > 0) {
+        var buffer: [2048]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        const allocator = fba.allocator();
+        try unseenFilter.populate(allocator, keysToAdd[0..keysIndex]);
+    }
+    return result;
+}
 
-fn punchNotify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce_url: std.net.Address, config: *const PunchParams) !bool {
-    try curl_cli.set_trim_body(0, 0);
-    const easy = curl_cli.easy;
-    var fetch_params = bin.FetchSingleParams{
-        .catalogId = config.catalogId,
-        .tld = config.tld,
-        .seed = config.seed,
-        .anonymizer = config.anonymizer,
+fn fetchUpdate(allocator: std.mem.Allocator, curl_module: *const wcurl.Curl, config: *const bin.FetchParams, alreadySeenFilter: *fastfilter.BinaryFuse(u32)) !?bin.Announce {
+    const latestPerCatalog = bin.fetchDecodeLatestInEveryCatalog(allocator, &curl_module.easy, config) catch |errz| {
+        std.log.err("F: {s} with {?s}", .{ @errorName(errz), curl_module.proxyManager.getCurrentProxy() });
+        metrics.err();
+        if (errz == wcurl.CurlError.OperationTimedout) {
+            metrics.timeout();
+        } else if (errz == wcurl.CurlError.SSLConnectError or errz == wcurl.CurlError.SSLCertProblem) {
+            metrics.sslError();
+        }
+        return error.FetchError;
     };
-    const startSeed = fetch_params.seed;
-    var maybe_update: ?bin.FetchResult = null;
-    for (0..config.iterations) |iter| {
-        var time_spent_query = std.time.milliTimestamp();
-
-        fetch_params.seed = startSeed + iter;
-        const pageSize: u16 = if ((fetch_params.seed ^ (config.seed << 2)) % 100 > 50) 50 else 10;
-        fetch_params.page.size = pageSize;
-        const result = bin.fetchPage(allocator, &easy, &fetch_params) catch |errz| not_found: {
-            std.log.debug("PErr with {?s} {s}", .{ curl_cli.proxyManager.getCurrentProxy(), @errorName(errz) });
-            _ = try curl_cli.dropCurrentProxy();
-            prometheus.err();
-            break :not_found null;
-        };
-        if (result) |data| {
-            if (data.extractTotal()) |total| {
-                prometheus.hit();
-                if (curl_cli.latest_query_metrics()) |metrics| {
-                    const execution_time_ms = metrics.total_time - metrics.pretransfer_time;
-                    prometheus.latency(@intCast(execution_time_ms));
-                }
-                if (total > config.lastSeenTotal) {
-                    std.log.info("Punch success 🚀 {d}: {s}", .{ total, data.url });
-                    maybe_update = data;
-                    break;
-                }
-            } else {
-                data.clear(allocator);
-                std.log.err("Total not found: {s}", .{data.body});
+    var unseen: ?bin.Announce = null;
+    defer {
+        for (latestPerCatalog.items) |article| {
+            if (unseen == null or article.id != unseen.?.id) {
+                article.deinit();
             }
         }
-        if (iter % 13 == 0) {
-            const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
-            defer file.close();
-            try prometheus.writeMetrics(file.writer());
-        }
-        try curl_cli.exchangeProxy();
-        time_spent_query = std.time.milliTimestamp() - time_spent_query;
-        const sleep_remaning: u64 = @intCast(@max(50, config.sleep - time_spent_query));
-        std.time.sleep(sleep_remaning * std.time.ns_per_ms);
+        latestPerCatalog.deinit();
     }
-    if (maybe_update) |update| no_update: {
-        defer update.clear(allocator);
-        const updated_id = update.extractTotal() orelse {
-            std.log.warn("No total in update {s}", .{update.url});
-            break :no_update;
-        };
-        const announce = parse.extractAnnounceContent(&update) orelse {
-            std.log.warn("Mailformed announce {s}", .{update.body});
-            break :no_update;
-        };
-        if (announce.title.len < 5 or announce.ts < 10000) {
-            std.log.warn("Mailformed announce {d}:{d} {s}({d})", .{ announce.id, updated_id, announce.title, announce.ts });
-            break :no_update;
-        }
-        const ts = std.time.timestamp();
-        std.log.info("Timestamps: ours {d} announcement {d}, diff: {d}", .{ ts, announce.ts, ts - @divFloor(announce.ts, 1000) });
-        const coins = try parse.extractCoins(allocator, announce.title);
-        defer allocator.free(coins);
-        const cid = update.extractCatalogId() orelse 0;
-        if (cid != config.catalogId) {
-            std.log.warn("Catalog mismatch {d} {d} {s}", .{ cid, config.catalogId, announce.title });
-            break :no_update;
-        }
-        const is_important = parse.listing_delisting(announce.title) >= 3;
-        if (coins.len == 0 and is_important) {
-            std.log.warn("No coins found {d} {s}", .{ announce.id, announce.title });
-            break :no_update;
-        }
-        const bytes_count = messaging.send_announce(allocator, announce_url, &coins, announce.ts, config.catalogId, &announce.title, is_important) catch 0;
-        std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ updated_id, bytes_count });
-        if (is_important) {
-            std.log.info("🔴 Call to action sent", .{});
-            std.time.sleep(std.time.ns_per_s * if (builtin.mode == .Debug) 1 else std.time.s_per_hour); // nothing to do here
-        } else {
-            std.time.sleep(std.time.ns_per_s * std.time.s_per_min * 1);
-        }
-    }
-    return maybe_update != null;
+    unseen = try filterLastUnseenInList(&latestPerCatalog, alreadySeenFilter);
+    std.log.debug("Found {d} articles in, {s} new", .{ latestPerCatalog.items.len, if (unseen != null) "1" else "nothing" });
+    return unseen;
 }
 
 fn resolve_address(address_with_port: []const u8) !std.net.Address {
