@@ -35,7 +35,8 @@ export default {
       "https://www.binance.info/bapi/apex/v1/public/apex/cms/article/list/query?type=1&pageNo=2&pageSize=2&catalogId=161",
       "https://www.binance.com/en/support/announcement/list/161",
       "https://www.binance.info/en/support/announcement/list/93",
-      "https://www.binance.me/en/support/announcement/list/93"
+      "https://www.binance.me/en/support/announcement/list/93",
+      "https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=20&category=all"
     ];
 
     let combinedHtml = "";

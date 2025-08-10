@@ -23,7 +23,6 @@ pub const Curl = struct {
         const ca_bundle = try curl.allocCABundle(allocator);
         errdefer ca_bundle.deinit();
         const timeout = try std.fmt.parseInt(u32, std.posix.getenv("QUERY_TIMEOUT") orelse "2000", 0);
-
         const easy = try curl.Easy.init(allocator, .{
             .default_user_agent = "Mozilla/5.0 Firefox/135.0", //
             .ca_bundle = ca_bundle,

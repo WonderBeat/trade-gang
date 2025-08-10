@@ -6,4 +6,4 @@
 #MQTT="10.46.114.82" MOTHERSHIP="127.0.0.1:8080" CATALOG=48 insecure=true TLD=com ./zig-out/bin/app
 #ANONYMIZER="http://127.0.0.1:8765/scrape" MQTT="10.46.114.82" MOTHERSHIP="127.0.0.1:8080" CATALOG=161 insecure=true TLD=info ./zig-out/bin/app
 
-MOTHERSHIP="127.0.0.1:8080" PROXY_LIST="localhost:8880/random-proxies?count=100" insecure=true time -l ./zig-out/bin/upbit
+DOMAIN="https://upbit.gladiators.dev" MOTHERSHIP="127.0.0.1:8081" time -l ./zig-out/bin/upbit

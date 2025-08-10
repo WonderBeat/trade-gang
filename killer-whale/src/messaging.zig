@@ -15,7 +15,7 @@ pub fn sendAnnounce(allocator: std.mem.Allocator, address: std.net.Address, anno
     for (coins) |token| {
         try array.append(protobuf.ManagedString.managed(token));
     }
-    const managed_title = protobuf.ManagedString.managed(announce.title[0..@min(announce.title.len, 40)]);
+    const managed_title = protobuf.ManagedString.managed(announce.title);
     const announceProto = protos.Announcement{
         .ts = @intCast(announce.releaseDate), //
         .tokens = array,
@@ -31,6 +31,7 @@ pub fn sendAnnounce(allocator: std.mem.Allocator, address: std.net.Address, anno
     try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
     const byteArray = try announceProto.encode(allocator);
+    std.debug.assert(byteArray.len < 1300);
     defer allocator.free(byteArray);
 
     const send_bytes = try posix.send(socket, byteArray, 0);

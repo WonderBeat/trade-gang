@@ -65,8 +65,9 @@ pub fn main() !void {
 
     const iterations = if (is_debug) 150 else (500 + seed % 500);
     var latestID: u32 = 0;
+    var totalCount: u32 = 0;
     var buf: [1000]u8 = undefined;
-    var urlBuf: [150]u8 = undefined;
+    var urlBuf: [300]u8 = undefined;
     std.debug.print("Seed: {d} Iterations: {d}\n", .{ seed, iterations });
     for (0..iterations) |iter| {
         if (iter % 17 == 0) {
@@ -74,7 +75,7 @@ pub fn main() !void {
         }
         seed += 1;
         const startIterationTs = std.time.milliTimestamp();
-        const url = try buildUrlZ(seed, webDomain, &urlBuf);
+        const url = try buildUrlZ(seed, webDomain, totalCount, &urlBuf);
         const result = httpClient.get(url) catch |errz| {
             metrics.err();
             if (errz == wcurl.CurlError.OperationTimedout) {
@@ -119,20 +120,30 @@ pub fn main() !void {
                 announce.title,
                 announce.releaseDate,
             });
-            const localhost = try resolve_address("127.0.0.1:6969");
+            const localhost = try resolve_address("127.0.0.1:8081");
             const bytesSent = try messaging.sendAnnounce(allocator, localhost, &announce);
             std.debug.assert(bytesSent > 0);
             std.log.info("Announce sent to localhost {d} bytes", .{bytesSent});
             latestID = id;
-        } else if (id > latestID) {
+            totalCount = announce.total;
+        } else if (id != latestID) {
             var announce = try extractAnnounce(allocator, body, &buf);
             announce.url = url;
             announce.total = id;
             _ = try messaging.sendAnnounce(allocator, send_announce_address, &announce);
             const announceTsMs = announce.releaseDate * 1000;
             const currentTs = std.time.milliTimestamp();
-            std.log.info("AS\t{d} TS\tours {d} announcement {d}, diff: {d} ms", .{ id, currentTs, announce.releaseDate, currentTs - announceTsMs });
+            std.log.info("AS {d} diff: {d} ms, TS {d}({d}), url {s}, seed {d}, at {d}", .{
+                id,
+                currentTs - announceTsMs,
+                currentTs,
+                announce.releaseDate,
+                url,
+                seed,
+                startIterationTs,
+            });
             latestID = id;
+            totalCount = announce.total;
         }
         try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
         const etag = try result.getHeader("etag") orelse return error.NoETag;
@@ -149,7 +160,6 @@ fn collectQueryMetrics(httpClient: *wcurl.Curl, flush: bool) !void {
     }
     if (flush) {
         try metrics.dumpToFile();
-        try httpClient.exchangeProxy();
     }
 }
 
@@ -171,6 +181,8 @@ fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8, buf: []u8) !b
     var parser = try simdjzon.ondemand.Parser.init(&src, allocator, "<s>", .{});
     defer parser.deinit();
     var doc = try parser.iterate();
+    var totalCountNode = try doc.at_pointer("/data/total_count");
+    const totalCount = try totalCountNode.get_int(u32);
     var dataSection = try doc.at_pointer("/data/notices");
     var first_element: simdjzon.ondemand.Value = (try @constCast(&(try dataSection.get_array())).at(0)) orelse return error.NoFirstElement;
     var listedAtNode = try first_element.find_field("listed_at");
@@ -180,6 +192,12 @@ fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8, buf: []u8) !b
             .iso8601 = listedAt,
         },
     })).unixTimestamp();
+    var categoryNode = try first_element.find_field("category");
+    const category = try categoryNode.get_string([]u8, buf);
+    var categoryNum: u16 = 888;
+    if (std.mem.eql(u8, category, "Trade") or std.mem.eql(u8, category, "거래")) {
+        categoryNum = 777;
+    }
     var titleNode = try first_element.find_field("title");
     const title = try titleNode.get_string([]u8, buf);
     var idNode = try first_element.find_field("id");
@@ -188,15 +206,15 @@ fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8, buf: []u8) !b
     return binance.Announce{
         .allocator = allocator,
         .releaseDate = timestamp,
-        .catalogId = 0,
+        .catalogId = categoryNum,
         .title = title,
         .id = id,
-        .total = 0,
+        .total = totalCount,
         .url = "",
     };
 }
 
-fn buildUrlZ(seed: usize, domain: [:0]const u8, buf: []u8) ![:0]u8 {
+fn buildUrlZ(seed: usize, domain: [:0]const u8, totalCount: u32, buf: []u8) ![:0]u8 {
     const os = switch ((seed ^ 0xfeed) % 2) {
         0 => "web",
         else => "android",
@@ -208,8 +226,8 @@ fn buildUrlZ(seed: usize, domain: [:0]const u8, buf: []u8) ![:0]u8 {
         1 => "%20",
         else => "0",
     };
-    const url = "{s}/api/v1/announcements?os={s}&page=1&per_page={s}{d}&category=all";
-    return try std.fmt.bufPrintZ(buf, url, .{ domain, os, pad, pageSize });
+    const url = "{s}/api/v1/announcements?os={s}&page=1&per_page={s}{d}&category=all&total={d}";
+    return try std.fmt.bufPrintZ(buf, url, .{ domain, os, pad, pageSize, totalCount });
 }
 
 inline fn extractTotalCount(haystack: []const u8) !u32 {
