@@ -5,8 +5,10 @@ ARG BUILDPLATFORM
 ARG ZIG_VERSION=0.14.1
 WORKDIR /usr/src
 
-RUN apt-get update
-RUN apt-get install curl tar xz-utils -y
+RUN apt-get update && \
+    apt-get install -y curl tar xz-utils && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY docker-zig-manager /usr/local/bin/docker-zig-manager
 RUN /usr/local/bin/docker-zig-manager fetch "$BUILDPLATFORM" $ZIG_VERSION
@@ -31,7 +33,7 @@ COPY src ./src/
 RUN ./build.sh "$TARGETPLATFORM" "/application"
 
 FROM alpine:3.21.3
-RUN apk add curl-dev socat
+RUN apk add --no-cache curl-dev socat
 COPY nc-web.sh /
 COPY --from=0 /application/bin/* /
 
