@@ -9,6 +9,7 @@ const fastfilter = @import("fastfilter");
 const simdjzon = @import("simdjzon");
 const zeit = @import("zeit");
 const binance = @import("binance.zig");
+const time = @import("time.zig");
 
 //for simdjzon
 pub const read_buf_cap = 4096;
@@ -72,6 +73,9 @@ pub fn main() !void {
     for (0..iterations) |iter| {
         if (iter % 17 == 0) {
             std.log.info("{d} iterations", .{iter});
+            if (!is_debug) {
+                try time.sleepWhileNotInRangeUTC(2, 10);
+            }
         }
         seed += 1;
         const startIterationTs = std.time.milliTimestamp();
@@ -82,6 +86,8 @@ pub fn main() !void {
                 metrics.timeout();
             } else if (errz == wcurl.CurlError.SSLConnectError or errz == wcurl.CurlError.SSLCertProblem or errz == wcurl.CurlError.PeerFailedVerification) {
                 metrics.sslError();
+            } else {
+                std.log.warn("Err {} for {s}", .{ errz, url });
             }
             try dropReplaceProxy(httpClient);
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
@@ -93,25 +99,34 @@ pub fn main() !void {
             if (result.status_code == 304) {
                 std.log.debug("Not modified {d}: {s} ", .{ result.status_code, url });
                 metrics.hit();
+            } else if (result.status_code == 429) {
+                metrics.err();
+                try dropReplaceProxy(httpClient);
+                if (httpClient.proxyManager.size() == 0) {
+                    std.time.sleep(std.time.ns_per_min * 10); // banned and has no other proxies
+                }
             } else {
                 std.log.warn("Call {d}: {s} ", .{ result.status_code, url });
                 metrics.err();
                 try dropReplaceProxy(httpClient);
             }
-            if (result.status_code == 429) {
-                try dropReplaceProxy(httpClient);
-                if (httpClient.proxyManager.size() == 0) {
-                    std.time.sleep(std.time.ns_per_min * 10); // banned and has no other proxies
-                }
-            }
+
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
             sleepRemaning(startIterationTs, intervalMs);
             continue;
         }
-        metrics.hit();
         const body = (result.body orelse return error.NoBody).items;
-        const id = try extractLatestID(body);
+        std.debug.assert(body.len > 100);
+        const id = extractLatestID(body) catch |errz| {
+            std.log.err("Latest ID error for {s}: {}, {s}", .{ url, errz, body[0..@min(body.len, 200)] });
+            metrics.err();
+            try dropReplaceProxy(httpClient);
+            try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
+            sleepRemaning(startIterationTs, intervalMs);
+            continue;
+        };
         std.debug.assert(id > 0);
+        metrics.hit();
         if (latestID == 0) {
             const announce = try extractAnnounce(allocator, body, &buf);
             std.log.info("Preflight test", .{});
@@ -131,15 +146,17 @@ pub fn main() !void {
             announce.url = url;
             announce.total = id;
             _ = try messaging.sendAnnounce(allocator, send_announce_address, &announce);
-            const announceTsMs = announce.releaseDate * 1000;
             const currentTs = std.time.milliTimestamp();
-            std.log.info("AS {d} diff: {d} ms, TS {d}({d}), url {s}, seed {d}, at {d}", .{
+            const announceTsMs = announce.releaseDate * 1000;
+            const diff = currentTs - announceTsMs;
+            const proxy = httpClient.proxyManager.getCurrentProxy() orelse "none";
+            std.log.info("AS {d} diff: {d} ms, TS {d}({d}), url {s}, proxy {s}, at {d}", .{
                 id,
-                currentTs - announceTsMs,
+                diff,
                 currentTs,
-                announce.releaseDate,
+                announceTsMs,
                 url,
-                seed,
+                proxy,
                 startIterationTs,
             });
             latestID = id;
@@ -221,13 +238,14 @@ fn buildUrlZ(seed: usize, domain: [:0]const u8, totalCount: u32, buf: []u8) ![:0
         // else => "ios",
     };
     const pageSize = (((seed / 10) ^ 0xdead * (seed / 10) ^ 0xbabe)) % 22 + 1; //  '/10' helps with etag
-    const pad = switch ((seed ^ 0xbaba * seed ^ 0x101) % 3) {
+    const pad = switch ((seed ^ 0xbaba * seed ^ 0x101) % 4) {
         0 => "+",
         1 => "%20",
+        2 => "+%20",
         else => "0",
     };
-    const url = "{s}/api/v1/announcements?os={s}&page=1&per_page={s}{d}&category=all&total={d}";
-    return try std.fmt.bufPrintZ(buf, url, .{ domain, os, pad, pageSize, totalCount });
+    const url = "{s}/api/v1/announcements?os={s}&page=1&per_page={s}{d}&category=all&total={d}&seed={d}";
+    return try std.fmt.bufPrintZ(buf, url, .{ domain, os, pad, pageSize, totalCount, seed });
 }
 
 inline fn extractTotalCount(haystack: []const u8) !u32 {

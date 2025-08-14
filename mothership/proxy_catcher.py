@@ -115,17 +115,19 @@ def custom_proxies():
 
 def proxy6net():
     return [
-        "socks5://yox7VC:wZWv8j@38.170.102.224:9850",
-        "socks5://yox7VC:wZWv8j@38.170.124.200:9298",
-        "socks5://yox7VC:wZWv8j@138.59.5.77:9974",
-        "socks5://yox7VC:wZWv8j@138.219.122.152:9281",
-        "socks5://yox7VC:wZWv8j@138.59.5.203:9759",
+        "socks5://FEfJQQ:ffKaKz@186.179.62.211:9116",
+        "socks5://FEfJQQ:ffKaKz@38.170.243.59:9460",
+        "socks5://FEfJQQ:ffKaKz@38.170.243.26:9281",
+        "socks5://FEfJQQ:ffKaKz@45.237.85.228:9754",
+        "socks5://FEfJQQ:ffKaKz@191.102.156.132:9193",
+        "socks5://FEfJQQ:ffKaKz@38.152.245.126:9871",
+        "socks5://FEfJQQ:ffKaKz@38.152.247.5:9333",
     ]
 
 
 def data_impulse():
     return [
-        "socks5://b7ae203cd4b047b96de5__cr.cn,jp,my,np,kr:cb25e7c83fca24fc@gw.dataimpulse.com:824"
+        "socks5://b7ae203cd4b047b96de5__cr.us:cb25e7c83fca24fc@gw.dataimpulse.com:824"
     ]
 
 
@@ -160,11 +162,11 @@ async def download_proxies():
             "pattern": r"([0-9.]+):([0-9]+):([^:]+):([a-z0-9]+)",
             "replacement": r"socks5://\3:\4@\1:\2",
         },
-        # {
-        #     "url": "https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks4.txt",
-        #     "pattern": r"(.+)",
-        #     "replacement": r"socks4://\1",
-        # },
+        {
+            "url": "https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks4.txt",
+            "pattern": r"(.+)",
+            "replacement": r"socks4://\1",
+        },
         {
             "url": "https://raw.githubusercontent.com/monosans/proxy-list/refs/heads/main/proxies/socks5.txt",
             "pattern": r"(.+)",
@@ -220,7 +222,8 @@ async def download_proxies():
             except (ClientError, asyncio.TimeoutError) as e:
                 logger.error(f"Error downloading from {source['url']}: {e}")
 
-    self_managed_proxies = resolve_k8s_proxies()
+    self_managed_proxies = []
+    # self_managed_proxies = resolve_k8s_proxies()
     self_managed_proxies.extend(custom_proxies())
     self_managed_proxies.extend(proxy6net())
     self_managed_proxies.extend(data_impulse())
@@ -231,7 +234,7 @@ async def download_proxies():
     )
     random.shuffle(new_proxies)
     start_time = time.time()
-    timeout_seconds = 500
+    timeout_seconds = 200
     proxies.extend(self_managed_proxies)
     for chunk in chunk_list(new_proxies, 100):
         elapsed_time = time.time() - start_time
@@ -239,13 +242,13 @@ async def download_proxies():
             break
         chunk_working_proxies = await filter_working_proxies(chunk, 3)
         proxies.extend(chunk_working_proxies)
-        proxies = list(dict.fromkeys(proxies))
+        # proxies = list(dict.fromkeys(proxies))
+        PROXY_COUNT.set(len(proxies))
+        last_updated = time.time()
+        LAST_UPDATE_TIMESTAMP.set(last_updated)
 
     if len(proxies) > 200:
         proxies = proxies[:200]
-    last_updated = time.time()
-    PROXY_COUNT.set(len(proxies))
-    LAST_UPDATE_TIMESTAMP.set(last_updated)
     logger.info(f"Proxy list updated with {len(proxies)} unique proxies")
 
 
@@ -308,7 +311,7 @@ async def get_stats(request):
 
 
 async def health(request):
-    if len(proxies) > 20:
+    if len(proxies) > 10:
         return web.Response(text="OK", status=200)
     else:
         return web.Response(text="NEP", status=500)
