@@ -397,3 +397,40 @@ pub fn decodeError(code: u32) !void {
         else => return error.UnexpectedError,
     };
 }
+
+//result lifespan is the same as curl body buffer
+pub fn resolveIpLocation(httpClient: *Curl, proxyUrl: [:0]const u8) ![]const u8 {
+    var ip: []const u8 = undefined;
+
+    // Handle case with protocol prefix (e.g., socks5://)
+    if (std.mem.indexOf(u8, proxyUrl, "://")) |proto_end| {
+        const after_protocol = proxyUrl[proto_end + 3 ..];
+        if (std.mem.indexOf(u8, after_protocol, "@")) |auth_end| {
+            ip = after_protocol[auth_end + 1 ..];
+        } else {
+            ip = after_protocol;
+        }
+    } else {
+        // Handle simple format (ip:port)
+        ip = proxyUrl;
+    }
+
+    // Remove port if present
+    if (std.mem.indexOf(u8, ip, ":")) |port_start| {
+        ip = ip[0..port_start];
+    }
+
+    if (ip.len == 0) {
+        return error.InvalidProxyFormat;
+    }
+    var buffer: [100]u8 = undefined;
+
+    // Construct ipinfo.io URL
+    const url = try std.fmt.bufPrintZ(&buffer, "https://ipinfo.io/{s}/city", .{ip});
+    const response = try httpClient.get(url);
+    const bodyBuffer = response.body orelse return error.NoBody;
+    if (bodyBuffer.capacity == 0) {
+        return error.NoBody;
+    }
+    return bodyBuffer.items;
+}

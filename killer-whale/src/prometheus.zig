@@ -11,6 +11,7 @@ const Metrics = struct {
     latency: Latency,
     timeout: m.Counter(u32),
     sslError: m.Counter(u32),
+    rateLimitErrors: m.Counter(u32),
 
     const Latency = m.Histogram(u16, &.{ 100, 200, 400, 600, 800, 1000, 1500, 3000 });
 };
@@ -39,6 +40,10 @@ pub fn latency(value: u16) void {
     metrics.latency.observe(value);
 }
 
+pub fn rateLimited() void {
+    metrics.rateLimitErrors.incr();
+}
+
 pub fn initializeMetrics(comptime opts: m.RegistryOpts) !void {
     metrics = .{
         .hits = m.Counter(u32).init("hits", .{}, opts),
@@ -47,6 +52,7 @@ pub fn initializeMetrics(comptime opts: m.RegistryOpts) !void {
         .sslError = m.Counter(u32).init("ssl_err", .{}, opts),
         .latest = m.Gauge(u32).init("latest", .{}, opts),
         .latency = Metrics.Latency.init("latency", .{}, opts),
+        .rateLimitErrors = m.Counter(u32).init("rate_limit_errors", .{}, opts),
     };
 }
 

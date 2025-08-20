@@ -70,11 +70,14 @@ pub fn main() !void {
     var buf: [1000]u8 = undefined;
     var urlBuf: [300]u8 = undefined;
     std.debug.print("Seed: {d} Iterations: {d}\n", .{ seed, iterations });
+    var rateReducer: u32 = 1;
     for (0..iterations) |iter| {
         if (iter % 17 == 0) {
             std.log.info("{d} iterations", .{iter});
-            if (!is_debug) {
-                try time.sleepWhileNotInRangeUTC(2, 10);
+            if (try time.sleepRemaningHours(2, 10) > 0) {
+                rateReducer = 5;
+            } else {
+                rateReducer = 1;
             }
         }
         seed += 1;
@@ -91,7 +94,7 @@ pub fn main() !void {
             }
             try dropReplaceProxy(httpClient);
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
-            sleepRemaning(startIterationTs, intervalMs);
+            sleepRemaning(startIterationTs, intervalMs * rateReducer);
             continue;
         };
 
@@ -101,8 +104,10 @@ pub fn main() !void {
                 metrics.hit();
             } else if (result.status_code == 429) {
                 metrics.err();
+                metrics.rateLimited();
                 try dropReplaceProxy(httpClient);
                 if (httpClient.proxyManager.size() == 0) {
+                    std.log.warn("Rate limited", .{});
                     std.time.sleep(std.time.ns_per_min * 10); // banned and has no other proxies
                 }
             } else {
@@ -112,7 +117,7 @@ pub fn main() !void {
             }
 
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
-            sleepRemaning(startIterationTs, intervalMs);
+            sleepRemaning(startIterationTs, intervalMs * rateReducer);
             continue;
         }
         const body = (result.body orelse return error.NoBody).items;
@@ -122,7 +127,7 @@ pub fn main() !void {
             metrics.err();
             try dropReplaceProxy(httpClient);
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
-            sleepRemaning(startIterationTs, intervalMs);
+            sleepRemaning(startIterationTs, intervalMs * rateReducer);
             continue;
         };
         std.debug.assert(id > 0);
@@ -149,15 +154,23 @@ pub fn main() !void {
             const currentTs = std.time.milliTimestamp();
             const announceTsMs = announce.releaseDate * 1000;
             const diff = currentTs - announceTsMs;
-            const proxy = httpClient.proxyManager.getCurrentProxy() orelse "none";
-            std.log.info("AS {d} diff: {d} ms, TS {d}({d}), url {s}, proxy {s}, at {d}", .{
+            const proxyLocation: ?[]const u8 = prxy: {
+                if (httpClient.proxyManager.getCurrentProxy()) |proxy| {
+                    break :prxy resolveIpLocation(allocator, proxy) catch null;
+                } else {
+                    break :prxy null;
+                }
+            };
+            defer if (proxyLocation) |loc| allocator.free(loc);
+            const proxy = httpClient.proxyManager.getCurrentProxy() orelse "";
+            std.log.info("AS {d}, {d}, url {s}, proxy {s}({?s}),TS {d}({d})", .{
                 id,
                 diff,
+                url[8..],
+                proxy,
+                proxyLocation,
                 currentTs,
                 announceTsMs,
-                url,
-                proxy,
-                startIterationTs,
             });
             latestID = id;
             totalCount = announce.total;
@@ -166,7 +179,7 @@ pub fn main() !void {
         const etag = try result.getHeader("etag") orelse return error.NoETag;
         try httpClient.initHeaders(.{ .etag = etag.get() });
         std.log.debug("Call {d}: {s} ", .{ result.status_code, url });
-        sleepRemaning(startIterationTs, intervalMs);
+        sleepRemaning(startIterationTs, intervalMs * rateReducer);
     }
 }
 
@@ -232,10 +245,11 @@ fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8, buf: []u8) !b
 }
 
 fn buildUrlZ(seed: usize, domain: [:0]const u8, totalCount: u32, buf: []u8) ![:0]u8 {
+    //const category = std.posix.getenv("CATEGORY") orelse "trade";
     const os = switch ((seed ^ 0xfeed) % 2) {
         0 => "web",
         else => "android",
-        // else => "ios",
+        //else => "ios",
     };
     const pageSize = (((seed / 10) ^ 0xdead * (seed / 10) ^ 0xbabe)) % 22 + 1; //  '/10' helps with etag
     const pad = switch ((seed ^ 0xbaba * seed ^ 0x101) % 4) {
@@ -282,6 +296,15 @@ fn resolve_address(address_with_port: []const u8) !std.net.Address {
     const address = iterator.next() orelse return error.AddressParseFailed;
     const port = try std.fmt.parseInt(u16, iterator.next() orelse return error.AddressParseFailed, 0);
     return try std.net.Address.parseIp(address, port);
+}
+
+// !!! creates local httpClient
+// return memory managed by client
+pub fn resolveIpLocation(allocator: std.mem.Allocator, proxyUrl: [:0]const u8) ![]const u8 {
+    const httpClient = try wcurl.Curl.init(allocator);
+    defer httpClient.deinit();
+    const location = wcurl.resolveIpLocation(httpClient, proxyUrl) catch "unknown";
+    return allocator.dupe(u8, location);
 }
 
 const expect = std.testing.expect;
