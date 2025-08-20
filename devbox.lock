@@ -1,6 +1,70 @@
 {
   "lockfile_version": "1",
   "packages": {
+    "aider-chat@latest": {
+      "last_modified": "2025-08-11T23:54:17Z",
+      "resolved": "github:NixOS/nixpkgs/5a983011e0f4b3b286aaa73e011ce32b1449a528#aider-chat",
+      "source": "devbox-search",
+      "version": "0.86.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/f0cww8yfr2qxsqyn0x6hxppspvwc9kyc-aider-chat-0.86.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/qskrs0fx5nw9z0wvxv24fhz5dk7xmclz-aider-chat-0.86.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/f0cww8yfr2qxsqyn0x6hxppspvwc9kyc-aider-chat-0.86.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/sbidah46hc3ln78hdz0852zyfs4spcnj-aider-chat-0.86.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/3nyv9y0scm3013b8n3wbqkq5nykniw12-aider-chat-0.86.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/sbidah46hc3ln78hdz0852zyfs4spcnj-aider-chat-0.86.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/wwpr25qpx7hhrq4l27y3w5inpbw0dzwb-aider-chat-0.86.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/7yml6aipsyx6g3bg4n44apccv2jrsnp3-aider-chat-0.86.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/wwpr25qpx7hhrq4l27y3w5inpbw0dzwb-aider-chat-0.86.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/rjqfw5nqrzpyr0yfrcpppsyr8b6j571k-aider-chat-0.86.0",
+              "default": true
+            },
+            {
+              "name": "dist",
+              "path": "/nix/store/k7kvp9rcb5ggigqa4qixapzg36jw22r5-aider-chat-0.86.0-dist"
+            }
+          ],
+          "store_path": "/nix/store/rjqfw5nqrzpyr0yfrcpppsyr8b6j571k-aider-chat-0.86.0"
+        }
+      }
+    },
     "bun@latest": {
       "last_modified": "2025-03-13T11:38:39Z",
       "resolved": "github:NixOS/nixpkgs/573c650e8a14b2faa0041645ab18aed7e60f0c9a#bun",
