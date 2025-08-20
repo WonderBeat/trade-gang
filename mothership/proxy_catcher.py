@@ -247,7 +247,6 @@ async def download_proxies():
     random.shuffle(new_proxies)
     start_time = time.time()
     timeout_seconds = 200
-    proxies.extend(self_managed_proxies)
     for chunk in chunk_list(new_proxies, 100):
         elapsed_time = time.time() - start_time
         if elapsed_time >= timeout_seconds:
@@ -259,8 +258,10 @@ async def download_proxies():
         LAST_UPDATE_TIMESTAMP.set(last_updated)
 
     proxies = list(dict.fromkeys(proxies))
-    if len(proxies) > 400:
-        proxies = proxies[:400]
+    if len(proxies) > 300:
+        proxies = proxies[:250]
+    proxies.extend(self_managed_proxies)
+    proxies = list(dict.fromkeys(proxies))
     logger.info(f"Proxy list updated with {len(proxies)} unique proxies")
 
 
@@ -269,7 +270,7 @@ def chunk_list(data: list[str], chunk_size: int) -> list[list[str]]:
     return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
-async def refresh_proxies_periodically(refresh_seconds=700):
+async def refresh_proxies_periodically(refresh_seconds=900):
     """Refresh the proxy list every N seconds"""
     while True:
         try:
