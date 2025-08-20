@@ -110,6 +110,7 @@ def custom_proxies():
         "socks5://10.88.101.13:1080",  # nasduck
         "socks5://10.88.101.77:1080",  # montenegro
         "socks5://10.88.101.101:1080",  # sofia
+        "socks5://10.88.101.78:1080",  # HongKong
     ]
 
 
@@ -163,6 +164,12 @@ async def download_proxies():
             "replacement": r"socks5://\3:\4@\1:\2",
         },
         {
+            # santiment
+            "url": "https://proxy.webshare.io/api/v2/proxy/list/download/qatpuawqcuhsigmsedblqzgcofisvdenujjyirwj/-/any/username/direct/",
+            "pattern": r"([0-9.]+):([0-9]+):([^:]+):([a-z0-9]+)",
+            "replacement": r"socks5://\3:\4@\1:\2",
+        },
+        {
             "url": "https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks4.txt",
             "pattern": r"(.+)",
             "replacement": r"socks4://\1",
@@ -176,6 +183,11 @@ async def download_proxies():
             "url": "https://raw.githubusercontent.com/monosans/proxy-list/refs/heads/main/proxies/socks4.txt",
             "pattern": r"(.+)",
             "replacement": r"socks4://\1",
+        },
+        {
+            "url": "https://raw.githubusercontent.com/dpangestuw/Free-Proxy/refs/heads/main/socks5_proxies.txt",
+            "pattern": r"(.+)",
+            "replacement": r"socks5://\1",
         },
         {
             "url": "https://api.best-proxies.ru/proxylist.txt?key=4660317f00a7da7d037b2b0d50d2f135&limit=1100&type=socks4,socks5&includeType",
@@ -242,13 +254,13 @@ async def download_proxies():
             break
         chunk_working_proxies = await filter_working_proxies(chunk, 3)
         proxies.extend(chunk_working_proxies)
-        # proxies = list(dict.fromkeys(proxies))
         PROXY_COUNT.set(len(proxies))
         last_updated = time.time()
         LAST_UPDATE_TIMESTAMP.set(last_updated)
 
-    if len(proxies) > 200:
-        proxies = proxies[:200]
+    proxies = list(dict.fromkeys(proxies))
+    if len(proxies) > 400:
+        proxies = proxies[:400]
     logger.info(f"Proxy list updated with {len(proxies)} unique proxies")
 
 
@@ -257,7 +269,7 @@ def chunk_list(data: list[str], chunk_size: int) -> list[list[str]]:
     return [data[i : i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
-async def refresh_proxies_periodically(refresh_seconds=876):
+async def refresh_proxies_periodically(refresh_seconds=700):
     """Refresh the proxy list every N seconds"""
     while True:
         try:
