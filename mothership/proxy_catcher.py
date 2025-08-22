@@ -19,6 +19,7 @@ from prometheus_client import (
 )
 
 proxies = []
+self_managed_proxies = []
 last_updated = 0
 
 # Prometheus metrics
@@ -154,7 +155,7 @@ def resolve_k8s_proxies():
 
 async def download_proxies():
     """Download proxies from multiple sources and format them"""
-    global proxies, last_updated
+    global proxies, self_managed_proxies, last_updated
 
     # Sources with their transformation patterns
     sources = [
@@ -234,13 +235,15 @@ async def download_proxies():
             except (ClientError, asyncio.TimeoutError) as e:
                 logger.error(f"Error downloading from {source['url']}: {e}")
 
-    self_managed_proxies = []
-    # self_managed_proxies = resolve_k8s_proxies()
-    self_managed_proxies.extend(custom_proxies())
-    self_managed_proxies.extend(proxy6net())
-    self_managed_proxies.extend(data_impulse())
-    smp_count = len(self_managed_proxies)
-    # self_managed_proxies = await filter_working_proxies(self_managed_proxies)  # python ssl errors
+    # Update self_managed_proxies
+    temp_self_managed = []
+    # temp_self_managed = resolve_k8s_proxies()
+    temp_self_managed.extend(custom_proxies())
+    temp_self_managed.extend(proxy6net())
+    temp_self_managed.extend(data_impulse())
+    smp_count = len(temp_self_managed)
+    # temp_self_managed = await filter_working_proxies(temp_self_managed)  # python ssl errors
+    self_managed_proxies = temp_self_managed
     logger.info(
         f"{len(self_managed_proxies)} out of {smp_count} self managed proxies left"
     )
@@ -309,6 +312,28 @@ async def get_random_proxies(request):
     return web.Response(text=response_text)
 
 
+async def get_random_self_managed_proxies(request):
+    """HTTP handler to serve a random subset of self-managed proxy list
+    Query parameter 'count' determines how many proxies to return
+    """
+    prefix = str(request.query.get("prefix", ""))
+    try:
+        count = int(request.query.get("count", "1"))
+        count = max(1, count)
+        count = min(count, len(self_managed_proxies))
+    except ValueError:
+        count = 1
+    available_proxies = self_managed_proxies
+    if prefix:
+        available_proxies = [proxy for proxy in self_managed_proxies if proxy.startswith(prefix)]
+
+    shuffled_proxies = random.sample(
+        available_proxies, min(count, len(available_proxies))
+    )
+    response_text = "\n".join(shuffled_proxies)
+    return web.Response(text=response_text)
+
+
 async def get_stats(request):
     """HTTP handler to show statistics"""
     stats = {
@@ -360,7 +385,8 @@ def server():
     app.router.add_get("/health", health)
     app.router.add_get("/stats", get_stats)
     app.router.add_get("/metrics", metrics)
-    app.router.add_get("/random-proxies", get_random_proxies)  # Add this line
+    app.router.add_get("/random-proxies", get_random_proxies)
+    app.router.add_get("/random-self-managed-proxies", get_random_self_managed_proxies)
 
     # Register startup and cleanup signals
     app.on_startup.append(start_background_tasks)
