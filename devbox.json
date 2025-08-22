@@ -12,7 +12,7 @@
     "docker-compose@latest",
     "kubectl@latest",
     "hurl@latest",
-    "aider-chat@latest",
+    "aider-chat-with-browser@latest",
   ],
   "env": {
     "DEVBOX_COREPACK_ENABLED": "true",
