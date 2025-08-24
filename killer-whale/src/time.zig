@@ -10,7 +10,16 @@ pub fn sleepRemaningHours(fromHour: u8, toHour: u8) !i64 {
     return -1;
 }
 
-// write documentation for this function AI!
+/// Sleeps until the current UTC time falls within the specified hour range.
+/// If the current hour is outside the [fromHour, toHour) range, the function
+/// will sleep for the remaining hours until toHour is reached.
+///
+/// Parameters:
+///   fromHour: The starting hour of the allowed range (inclusive)
+///   toHour: The ending hour of the allowed range (exclusive)
+///
+/// Returns:
+///   void - continues execution once the time is within range
 pub fn sleepWhileNotInRangeUTC(fromHour: u8, toHour: u8) !void {
     var hoursSleepRemaning: i64 = sleepRemaningHours(fromHour, toHour);
     if (hoursSleepRemaning > 0) {
