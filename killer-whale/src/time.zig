@@ -10,6 +10,7 @@ pub fn sleepRemaningHours(fromHour: u8, toHour: u8) !i64 {
     return -1;
 }
 
+// write documentation for this function AI!
 pub fn sleepWhileNotInRangeUTC(fromHour: u8, toHour: u8) !void {
     var hoursSleepRemaning: i64 = sleepRemaningHours(fromHour, toHour);
     if (hoursSleepRemaning > 0) {
