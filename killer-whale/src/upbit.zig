@@ -244,7 +244,6 @@ fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8, buf: []u8) !b
     };
 }
 
-// write a test for this function AI!
 fn buildUrlZ(seed: usize, domain: [:0]const u8, totalCount: u32, buf: []u8) ![:0]u8 {
     //const category = std.posix.getenv("CATEGORY") orelse "trade";
     const os = switch ((seed ^ 0xfeed) % 2) {
@@ -336,6 +335,25 @@ test "parse announce" {
     try std.testing.expectEqualStrings("업비트 코인빌리기 - 테더(USDT) 지원 종료 안내", announce.title);
     try std.testing.expectEqual(5373, announce.id);
     try std.testing.expectEqual(1753701007, announce.releaseDate);
+}
+
+test "buildUrlZ" {
+    var buf: [300]u8 = undefined;
+    const domain = "https://api-manager.upbit.com";
+    
+    // Test with seed 0
+    const url1 = try buildUrlZ(0, domain, 100, &buf);
+    try std.testing.expectEqualStrings(
+        "https://api-manager.upbit.com/api/v1/announcements?os=android&page=1&per_page=021&category=all&total=100&seed=0",
+        url1
+    );
+    
+    // Test with seed 1
+    const url2 = try buildUrlZ(1, domain, 200, &buf);
+    try std.testing.expectEqualStrings(
+        "https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=011&category=all&total=200&seed=1",
+        url2
+    );
 }
 
 test {
