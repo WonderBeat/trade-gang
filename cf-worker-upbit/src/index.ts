@@ -23,10 +23,10 @@ export default {
     const body = await upstream.text();
 
     if (upstream.status === 304 || upstream.status > 400) {
-      return new Response(null, { status: upstream.status });
+      return new Response(body, { status: upstream.status });
     }
     if (body.startsWith('error code')) {
-      return new Response(null, { status: 429 });
+      return new Response(body, { status: 429 });
     }
 
     if (total_count > 1 && body.slice(25, 100).indexOf(`"total_count":${total_count + 1}`) < 0) {
