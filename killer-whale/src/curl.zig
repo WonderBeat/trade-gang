@@ -48,10 +48,6 @@ pub const Curl = struct {
             try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_PROXY_SSL_VERIFYPEER, @as(c_long, 0)));
             try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_PROXY_SSL_VERIFYHOST, @as(c_long, 0)));
         }
-
-        if (std.posix.getenv("socks_proxy")) |socks_proxy| {
-            try checkCode(curl.libcurl.curl_easy_setopt(easy.handle, curl.libcurl.CURLOPT_PROXY, socks_proxy.ptr));
-        }
         errdefer easy.deinit();
         //const user_agent = try std.fmt.allocPrint(allocator, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:135.0) Gecko/20100101 Firefox/135.0, {s}", .{hostname});
         //errdefer allocator.free(user_agent);
@@ -65,6 +61,9 @@ pub const Curl = struct {
             .proxyManager = proxy.ProxyManager.init(allocator),
             .receiveBuffer = try Buffer.initCapacity(self.allocator, 12000),
         };
+        if (std.posix.getenv("socks_proxy")) |socks_proxy| {
+            try self.setProxy(socks_proxy);
+        }
         try self.initHeaders(.{});
         return self;
     }
@@ -137,6 +136,7 @@ pub const Curl = struct {
         }
         if (self.proxyManager.getNextProxy()) |proxy_url| {
             try self.setProxy(proxy_url);
+            std.log.debug("Proxy changed to {s}", .{proxy_url});
         }
     }
 
@@ -191,7 +191,7 @@ fn perform(allocator: std.mem.Allocator, client: *const curl.Easy) !curl.Easy.Re
     var status_code: c_long = 0;
     var code = curl.libcurl.curl_easy_perform(client.handle);
     if (code != curl.libcurl.CURLE_OK) {
-        std.log.debug("curl err code:{d}, msg:{s}\n", .{ code, curl.libcurl.curl_easy_strerror(code) });
+        std.log.debug("curl err code:{d}, msg:{s}", .{ code, curl.libcurl.curl_easy_strerror(code) });
         try decodeError(code);
     }
 
