@@ -74,7 +74,8 @@ pub fn main() !void {
     for (0..iterations) |iter| {
         if (iter % 17 == 0) {
             std.log.info("{d} iterations", .{iter});
-            if (try time.sleepRemaningHours(2, 10) > 0) {
+            const now = (try zeit.instant(.{}));
+            if (!is_debug and !time.isTimeBetweenHours(&now, 2, 10) or time.isWeekend(&now)) {
                 rateReducer = 5;
             } else {
                 rateReducer = 1;
@@ -92,9 +93,10 @@ pub fn main() !void {
             } else {
                 std.log.warn("Err {} for {s}", .{ errz, url });
             }
+            std.log.debug("Call error {}, for proxy {s}", .{ errz, httpClient.proxyManager.getCurrentProxy() orelse "none" });
             try dropReplaceProxy(httpClient);
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
-            sleepRemaning(startIterationTs, intervalMs * rateReducer);
+            _ = sleepRemaning(startIterationTs, intervalMs * rateReducer);
             continue;
         };
 
@@ -117,7 +119,7 @@ pub fn main() !void {
             }
 
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
-            sleepRemaning(startIterationTs, intervalMs * rateReducer);
+            _ = sleepRemaning(startIterationTs, intervalMs * rateReducer);
             continue;
         }
         const body = (result.body orelse return error.NoBody).items;
@@ -127,7 +129,7 @@ pub fn main() !void {
             metrics.err();
             try dropReplaceProxy(httpClient);
             try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
-            sleepRemaning(startIterationTs, intervalMs * rateReducer);
+            _ = sleepRemaning(startIterationTs, intervalMs * rateReducer);
             continue;
         };
         std.debug.assert(id > 0);
@@ -178,8 +180,8 @@ pub fn main() !void {
         try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
         const etag = try result.getHeader("etag") orelse return error.NoETag;
         try httpClient.initHeaders(.{ .etag = etag.get() });
-        std.log.debug("Call {d}: {s} ", .{ result.status_code, url });
-        sleepRemaning(startIterationTs, intervalMs * rateReducer);
+        const execTime = sleepRemaning(startIterationTs, intervalMs * rateReducer);
+        std.log.debug("Call {d} ({d}): {s} ", .{ result.status_code, execTime, url });
     }
 }
 
@@ -199,12 +201,14 @@ fn dropReplaceProxy(httpClient: *wcurl.Curl) !void {
     }
 }
 
-fn sleepRemaning(startIterationTs: i64, intervalTimeMs: u32) void {
+fn sleepRemaning(startIterationTs: i64, intervalTimeMs: u32) i64 {
     const timeTaken = std.time.milliTimestamp() - startIterationTs;
     const sleepRemaningMs: u64 = @intCast(@max(1000, intervalTimeMs - timeTaken));
     std.time.sleep(std.time.ns_per_ms * sleepRemaningMs); // cooldown
+    return timeTaken;
 }
 
+// json parsing basically
 fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8, buf: []u8) !binance.Announce {
     const stream = std.io.fixedBufferStream(body);
     var src = std.io.StreamSource{ .const_buffer = stream };
@@ -340,20 +344,14 @@ test "parse announce" {
 test "buildUrlZ" {
     var buf: [300]u8 = undefined;
     const domain = "https://api-manager.upbit.com";
-    
+
     // Test with seed 0
     const url1 = try buildUrlZ(0, domain, 100, &buf);
-    try std.testing.expectEqualStrings(
-        "https://api-manager.upbit.com/api/v1/announcements?os=android&page=1&per_page=021&category=all&total=100&seed=0",
-        url1
-    );
-    
+    try std.testing.expectEqualStrings("https://api-manager.upbit.com/api/v1/announcements?os=android&page=1&per_page=%201&category=all&total=100&seed=0", url1);
+
     // Test with seed 1
     const url2 = try buildUrlZ(1, domain, 200, &buf);
-    try std.testing.expectEqualStrings(
-        "https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=011&category=all&total=200&seed=1",
-        url2
-    );
+    try std.testing.expectEqualStrings("https://api-manager.upbit.com/api/v1/announcements?os=web&page=1&per_page=+%201&category=all&total=200&seed=1", url2);
 }
 
 test {
