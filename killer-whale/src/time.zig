@@ -6,27 +6,6 @@ pub fn isTimeBetweenHours(instant: *const zeit.Instant, fromHour: u8, toHour: u8
     return now.hour >= fromHour and now.hour < toHour;
 }
 
-/// Sleeps until the current UTC time falls within the specified hour range.
-/// If the current hour is outside the [fromHour, toHour) range, the function
-/// will sleep for the remaining hours until toHour is reached.
-///
-/// Parameters:
-///   fromHour: The starting hour of the allowed range (inclusive)
-///   toHour: The ending hour of the allowed range (exclusive)
-///
-/// Returns:
-///   void - continues execution once the time is within range
-pub fn sleepWhileNotInRangeUTC(fromHour: u8, toHour: u8) !void {
-    var hoursSleepRemaning: i64 = isTimeBetweenHours(fromHour, toHour);
-    if (hoursSleepRemaning > 0) {
-        std.log.info("Sleeping until {d} -> {d} {d}", .{ fromHour, toHour, hoursSleepRemaning });
-    }
-    while (hoursSleepRemaning > 0) {
-        std.time.sleep(std.time.ns_per_min * hoursSleepRemaning);
-        hoursSleepRemaning = isTimeBetweenHours(fromHour, toHour);
-    }
-}
-
 pub fn isWeekend(now: *const zeit.Instant) bool {
     const dayNum = @intFromEnum(zeit.weekdayFromDays(@divFloor(now.unixTimestamp(), std.time.s_per_day)));
     return dayNum == 0 or dayNum == 6;
@@ -34,7 +13,8 @@ pub fn isWeekend(now: *const zeit.Instant) bool {
 
 const testing = std.testing;
 
-test "parsing total response" {
+test "isWeekend" {
+    // Aug 29 2025 is Friday (weekday 5) - not a weekend
     {
         const iso = try zeit.instant(.{
             .source = .{
@@ -43,6 +23,8 @@ test "parsing total response" {
         });
         try std.testing.expect(!isWeekend(&iso));
     }
+
+    // Aug 30 2025 is Saturday (weekday 6) - weekend
     {
         const iso = try zeit.instant(.{
             .source = .{
@@ -51,6 +33,8 @@ test "parsing total response" {
         });
         try std.testing.expect(isWeekend(&iso));
     }
+
+    // Aug 31 2025 is Sunday (weekday 0) - weekend
     {
         const iso = try zeit.instant(.{
             .source = .{
@@ -58,5 +42,57 @@ test "parsing total response" {
             },
         });
         try std.testing.expect(isWeekend(&iso));
+    }
+}
+
+test "isTimeBetweenHours" {
+    // Test time within range
+    {
+        const iso = try zeit.instant(.{
+            .source = .{
+                .iso8601 = "2025-08-29T10:30:00.000-0000",
+            },
+        });
+        try std.testing.expect(isTimeBetweenHours(&iso, 9, 12));
+    }
+
+    // Test time at lower boundary
+    {
+        const iso = try zeit.instant(.{
+            .source = .{
+                .iso8601 = "2025-08-29T09:00:00.000-0000",
+            },
+        });
+        try std.testing.expect(isTimeBetweenHours(&iso, 9, 12));
+    }
+
+    // Test time at upper boundary (should be false as range is [from, to))
+    {
+        const iso = try zeit.instant(.{
+            .source = .{
+                .iso8601 = "2025-08-29T12:00:00.000-0000",
+            },
+        });
+        try std.testing.expect(!isTimeBetweenHours(&iso, 9, 12));
+    }
+
+    // Test time before range
+    {
+        const iso = try zeit.instant(.{
+            .source = .{
+                .iso8601 = "2025-08-29T08:30:00.000-0000",
+            },
+        });
+        try std.testing.expect(!isTimeBetweenHours(&iso, 9, 12));
+    }
+
+    // Test time after range
+    {
+        const iso = try zeit.instant(.{
+            .source = .{
+                .iso8601 = "2025-08-29T15:30:00.000-0000",
+            },
+        });
+        try std.testing.expect(!isTimeBetweenHours(&iso, 9, 12));
     }
 }
