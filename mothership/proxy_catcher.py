@@ -110,7 +110,7 @@ def custom_proxies():
     return [
         "socks5://10.88.101.13:1080",  # nasduck
         "socks5://10.88.101.77:1080",  # montenegro
-        "socks5://10.88.101.101:1080",  # sofia
+        # "socks5://10.88.101.101:1080",  # sofia
         "socks5://10.88.101.78:1080",  # HongKong
     ]
 
@@ -325,7 +325,9 @@ async def get_random_self_managed_proxies(request):
         count = 1
     available_proxies = self_managed_proxies
     if prefix:
-        available_proxies = [proxy for proxy in self_managed_proxies if proxy.startswith(prefix)]
+        available_proxies = [
+            proxy for proxy in self_managed_proxies if proxy.startswith(prefix)
+        ]
 
     shuffled_proxies = random.sample(
         available_proxies, min(count, len(available_proxies))

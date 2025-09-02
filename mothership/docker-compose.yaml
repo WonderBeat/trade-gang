@@ -5,7 +5,7 @@ services:
     restart: on-failure
     container_name: udp-to-websocket
     environment:
-      - DRY_RUN=0
+      - DRY_RUN=1
       - RELAY=1
       - WEBSOCKET_SERVER_URI=ws://149.28.27.193:8765
     # ports:
