@@ -7,6 +7,7 @@ from abc import ABCMeta
 from dataclasses import asdict, dataclass, field
 from typing import List, Set
 import re
+import time
 
 import websockets
 from all_pb2 import Announcement
@@ -66,6 +67,7 @@ async def run_udp_server():
         cex = PageEntryCEX.BINANCE.value
         dry_run = False
         decoded_tokens = None
+
         if message.catalog == 777 or message.catalog == 888:  # upbit announce
             decoded_tokens = parse_upbit_listing_tokens(message.title)
             message.catalog = 48  # listing
@@ -90,6 +92,13 @@ async def run_udp_server():
         )
         json_str = json_forward_announce.to_json_str()
         logger.info(f"Received {json_forward_announce} from {addr}")
+
+        current_time = int(time.time())
+        if message.ts < (current_time - 5):
+            logger.info(
+                f"Received stale announce from {addr}: message.ts={message.ts}, current_time={current_time}"
+            )
+            continue
         if cex == PageEntryCEX.BINANCE.value and not message.call_to_action:
             logger.debug("No need to relay")
             continue
