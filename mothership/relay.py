@@ -70,10 +70,11 @@ async def run_udp_server():
 
         if message.catalog == 777 or message.catalog == 888:  # upbit announce
             decoded_tokens = parse_upbit_listing_tokens(message.title)
-            message.catalog = 48  # listing
             cex = PageEntryCEX.UPBIT.value
             dry_run = True
         if message.catalog == 777:
+            cex = PageEntryCEX.UPBIT.value
+            message.catalog = 48  # listing
             dry_run = False
         dry_run = dry_run or DRY_RUN
 
@@ -91,17 +92,27 @@ async def run_udp_server():
             dry_run=dry_run,
         )
         json_str = json_forward_announce.to_json_str()
-        logger.info(f"Received {json_forward_announce} from {addr}")
+        # Convert timestamp from seconds to milliseconds
+        message_ts_ms = message.ts * 1000
+        current_time_ms = int(time.time() * 1000)
+        time_diff_ms = current_time_ms - message_ts_ms
 
-        current_time = int(time.time())
-        if message.ts < (current_time - 5):
+        logger.info(
+            f"Received {json_forward_announce} from {addr}. Time difference: {time_diff_ms}ms"
+        )
+
+        if message_ts_ms < (current_time_ms - 5000):  # 5 seconds in milliseconds
             logger.info(
-                f"Received stale announce from {addr}: message.ts={message.ts}, current_time={current_time}"
+                f"Received stale announce from {addr}: message.ts={message_ts_ms}ms, current_time={current_time_ms}ms, difference={time_diff_ms}ms"
             )
             continue
         if cex == PageEntryCEX.BINANCE.value and not message.call_to_action:
             logger.debug("No need to relay")
             continue
+        if message.catalog == 888:
+            logger.debug("No need to relay. Not a listing")
+            continue
+
         try:
             async with websockets.connect(WEBSOCKET_SERVER_URI) as websocket:
                 await websocket.send(json_str)
