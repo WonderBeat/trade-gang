@@ -2,10 +2,7 @@
 
 set -eux
 
-zig build test
-zig build test -Dapp=upbit
-zig build --release=fast
-zig build -Dapp=upbit --release=fast
+./test.sh
 
 #docker buildx build --platform linux/amd64 --push \
 time docker buildx build --platform linux/amd64,linux/arm64 --push \
