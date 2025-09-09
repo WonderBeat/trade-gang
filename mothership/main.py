@@ -7,7 +7,16 @@ from loguru import logger
 import os
 import asyncio
 
+def print_build_date():
+    try:
+        with open("build_date.txt", "r") as f:
+            build_date = f.read().strip()
+            logger.info(f"Build date: {build_date}")
+    except FileNotFoundError:
+        logger.warning("build_date.txt not found")
+
 if __name__ == "__main__":
+    print_build_date()
     if os.environ.get("RELAY", None):
         from relay import relay
 

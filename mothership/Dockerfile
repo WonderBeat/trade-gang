@@ -9,4 +9,6 @@ RUN uv sync --script "main.py"
 
 ADD . /app
 
+RUN echo $(date) > /app/build_date.txt
+
 CMD ["./main.py"]
