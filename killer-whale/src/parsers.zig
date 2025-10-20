@@ -32,9 +32,9 @@ test "detect delisting" {
     try expect(isAnnounceImportant("Binance Announced the First Batch of Vote to List Results and Will List Mubarak (MUBARAK), CZ'S Dog (BROCCOLI714), Tutorial (TUT), and Banana For Scale (BANANAS31) With Seed Tags Applied") == 3);
 }
 
-pub fn extractCoins(allocator: std.mem.Allocator, text: []const u8) ![]const []const u8 {
-    var list = std.ArrayList([]const u8).init(allocator);
-    defer list.deinit();
+pub fn extractCoins(allocator: std.mem.Allocator, text: []const u8) ![][]const u8 {
+    var list = try std.ArrayList([]const u8).initCapacity(allocator, 5);
+    defer list.deinit(allocator);
 
     var i: usize = 0;
     while (i < text.len) {
@@ -48,7 +48,7 @@ pub fn extractCoins(allocator: std.mem.Allocator, text: []const u8) ![]const []c
             if (in_the_middle) {
                 const has_no_chars_on_side = !std.ascii.isAlphabetic(text[i - 1]) and !std.ascii.isAlphabetic(text[j]);
                 if (has_no_chars_on_side and coin.len >= 3 and coin.len <= 12) {
-                    try list.append(coin);
+                    try list.append(allocator, coin);
                     i = j;
                 } else {
                     i += 1;
@@ -61,7 +61,7 @@ pub fn extractCoins(allocator: std.mem.Allocator, text: []const u8) ![]const []c
         }
     }
 
-    return list.toOwnedSlice();
+    return try list.toOwnedSlice(allocator);
 }
 
 test "extract coins from title 1" {

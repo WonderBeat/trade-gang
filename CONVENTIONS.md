@@ -1,0 +1,3 @@
+- Use camelCase
+- Use types if possible
+- Write comments starting with lowercase letter

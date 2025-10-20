@@ -19,40 +19,40 @@
     // internet connectivity.
     .dependencies = .{
         .curl = .{
-            .url = "https://github.com/jiacai2050/zig-curl/archive/refs/tags/v0.1.1.tar.gz",
-            .hash = "curl-0.1.1-P4tT4WzAAAD0MGbSfsyGV1hPdooNwZ5odcQYUB9iYlHe",
+            .url = "https://github.com/jiacai2050/zig-curl/archive/refs/tags/v0.3.1.tar.gz",
+            .hash = "curl-0.3.1-P4tT4b_JAAC2bpWR1_NjsHTrg_Ufz2mmojU-e-y9k_99",
         },
         .zeit = .{
-            .url = "https://github.com/rockorager/zeit/archive/v0.6.0.tar.gz",
-            .hash = "zeit-0.0.0-5I6bk_pZAgB03N1p1GmVOZ--gOFwwQSRKj1UXb5tnaKS",
+            .url = "https://github.com/rockorager/zeit/archive/v0.7.0.tar.gz",
+            .hash = "zeit-0.6.0-5I6bk7V8AgAY0-hM-vUYtKZUFYhXct-VRkqISNNTfEfb",
         },
         .protobuf = .{
-            .url = "https://github.com//Arwalk/zig-protobuf/archive/27f8910aac3840722817d0bd56750916afd619a4.tar.gz",
-            .hash = "protobuf-2.0.0-0e82aqCZGwCTEk11MsgMiy1G4ZP2Q1QKX4QJ9dqfF_M6",
+            .url = "https://github.com/Arwalk/zig-protobuf/archive/refs/tags/v3.0.1.tar.gz",
+            .hash = "protobuf-3.0.0-0e82aqDhJwD5l0ZV3WJ9tcRS0v5SD8ofIQa3mYJQzeor",
         },
         .nexlog = .{
-            .url = "https://github.com/chrischtel/nexlog/archive/v0.4.2.tar.gz",
-            .hash = "nexlog-0.4.0-zfPDxICBAQBF-34lmyeiYXDPeeCC_TolXv1D3Bi_Ogp9",
+            .url = "https://github.com/chrischtel/nexlog/archive/v0.7.2.tar.gz",
+            .hash = "nexlog-0.7.1-zfPDxMODAgCNyxp4x3xPp2V8Dx4mJ38GYHv4943DuNtu",
         },
         .yazap = .{
-            .url = "git+https://github.com/prajwalch/yazap/?ref=v0.6.3#71490491b8f1b0741218160b88cf0a87d2a941ce",
-            .hash = "yazap-0.6.3-Z1t-EiLlAQCR5mUSOlF1PovnwyPcIUGeV02lAIVMUEOc",
+            .url = "git+https://github.com/prajwalch/yazap#5aad02aed585bd791c2592e1979417428a055ec4",
+            .hash = "yazap-0.6.3-Z1t-EmrzAQA-8vFR-JGpI7vCSpHv5_6z6PAIDq2X4PoH",
         },
         .mqttz = .{
-            .url = "https://github.com/karlseguin/mqttz/archive/3e43f007fee79daaaaa27fa99407b10f6e6bc694.tar.gz",
-            .hash = "mqttz-0.0.0-ywFE_xXwAgBlpM_ArncPr0O8cPoDgDSmE8FLc3p5vOUT",
+            .url = "git+https://github.com/karlseguin/mqttz#439e4c42d4bc20b8950495cf25054a81e3a770f6",
+            .hash = "mqttz-0.0.0-ywFE_zcMAwBqZ-UFh4x_-AxSpaQi9m4QejXw2pxsy_RE",
         },
         .metrics = .{
-            .url = "https://github.com/karlseguin/metrics.zig/archive/2b584b6209871b7215706028988169599451dc0d.tar.gz",
-            .hash = "metrics-0.0.0-W7G4eCG0AQCQXidzvV5kx4l0smr_WCw-8JLIwS_OHYoW",
+            .url = "git+https://github.com/karlseguin/metrics.zig#603954879849c331a26529b88254770089acac8b",
+            .hash = "metrics-0.0.0-W7G4eP2_AQAdJGKMonHeZFaY4oU4ZXPFFTqFCFXItX3O",
         },
         .simdjzon = .{
-            .url = "git+https://github.com/travisstaloch/simdjzon#62ca9484520a088315f3b123605d2cf108b6abf1",
-            .hash = "simdjzon-0.0.1-7uNSgGddBQBshResiWQfzBc8Mt2w6WUDlsrF3HDJpWwL",
+            .url = "git+https://github.com/travisstaloch/simdjzon#091f827474b41121598fb089303ada1fa24641f1",
+            .hash = "simdjzon-0.0.1-7uNSgHSbBQAKhbCuVcqFMImf7gNIlGoVjEG2oi6yeSt3",
         },
         .fastfilter = .{
-            .url = "git+https://github.com/hexops/fastfilter#7081b6d8c0470c4e418c0cfed6eeadf89d0cc8a8",
-            .hash = "N-V-__8AAHWaAQBJ9q07Yhbuf-EvCN1hvYXF5BgKe5-aHcg2",
+            .url = "git+https://github.com/WonderBeat/fastfilter#fc6c4b3db708bd8a8bcbaf701a8d0e18115c5a74",
+            .hash = "fastfilter-1.0.1-K9SzPN4VAQD5-0y2B5SbmtL2A0xurqa-fDgFw09kPCNp",
         },
     },
     .paths = .{

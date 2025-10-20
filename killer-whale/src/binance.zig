@@ -14,18 +14,19 @@ const wcurl = @import("curl.zig");
 const simdjzon = @import("simdjzon");
 
 pub fn http_get(allocator: std.mem.Allocator, client: *const curl.Easy, url: []const u8) ![]const u8 {
-    const response = rsp: {
+    var response = rsp: {
         const urlZ: [:0]u8 = try allocator.allocSentinel(u8, url.len, 0);
         @memcpy(urlZ, url);
         defer allocator.free(urlZ);
         break :rsp try wcurl.get(allocator, client, urlZ);
     };
-    defer response.deinit();
+    defer response.deinit(allocator);
     if (response.status_code < 200 or response.status_code >= 300) {
         std.log.err("req failed with {d} for URL: {s}", .{ response.status_code, url });
         return error.StatusCodeErr;
     }
-    var headerIterator = try response.iterateHeaders(.{});
+    var headerIterator =
+        try response.curl_response.iterateHeaders(.{});
     while (try headerIterator.next()) |header| {
         if (isCacheHit(&header)) {
             return NetworkError.CacheHit;
@@ -41,31 +42,27 @@ pub fn http_get(allocator: std.mem.Allocator, client: *const curl.Easy, url: []c
 }
 
 pub fn http_post(allocator: std.mem.Allocator, client: *const curl.Easy, url: []const u8, content: []const u8) ![]const u8 {
-    var buf = std.ArrayList(u8).init(allocator);
+    var buf = try std.ArrayList(u8).initCapacity(allocator, 2000);
+    defer buf.deinit(allocator);
     const response = rsp: {
-        errdefer buf.deinit();
+        errdefer buf.deinit(allocator);
         const urlZ: [:0]u8 = try allocator.allocSentinel(u8, url.len, 0);
         @memcpy(urlZ, url);
         defer allocator.free(urlZ);
-        try client.setWritefunction(curl.bufferWriteCallback);
         try client.setWritedata(&buf);
         try client.setUrl(urlZ);
         try client.setPostFields(content);
-        var resp = try client.perform();
-        resp.body = buf;
-        break :rsp resp;
+        break :rsp try client.perform();
     };
-    defer response.deinit();
     if (response.status_code < 200 or response.status_code >= 300) {
         std.log.err("POST failed with {d} for URL: {s}", .{ response.status_code, url });
         return error.StatusCodeErr;
     }
-    const body_buffer = response.body orelse return error.NoBody;
-    if (body_buffer.capacity == 0) {
+    if (buf.capacity == 0) {
         std.log.warn("NB: {d}", .{response.status_code});
         return error.NoBody;
     }
-    return try allocator.dupe(u8, body_buffer.items);
+    return try allocator.dupe(u8, buf.items);
 }
 
 const available_page_sizes = [_]u32{ 50, 20, 15, 10, 5, 3, 2 };
@@ -99,111 +96,72 @@ pub const Announce = struct {
     releaseDate: i64,
     catalogId: u16,
     title: []const u8,
-    _titleGc: bool = false,
     id: u32,
 
     pub fn parseFirstEveryCatalog(allocator: std.mem.Allocator, url: []const u8, body: []const u8) !std.ArrayList(Announce) {
-        var result = std.ArrayList(Announce).init(allocator);
+        var result = try std.ArrayList(Announce).initCapacity(allocator, 1);
         errdefer {
             for (result.items) |article| {
                 article.deinit();
             }
-            result.deinit();
+            result.deinit(allocator);
         }
-        var src = std.io.StreamSource{ .const_buffer = std.io.fixedBufferStream(body) };
-        var parser = try simdjzon.ondemand.Parser.init(&src, allocator, "<s>", .{});
+        var parser = try simdjzon.dom.Parser.initFixedBuffer(allocator, body, .{});
         defer parser.deinit();
-        var doc = try parser.iterate();
-        var dataSection = try doc.at_pointer("/data/catalogs");
+        try parser.parse();
+        var dataSection = try parser.element().at_pointer("/data/catalogs");
+        var index: u32 = 0;
         var arr = try dataSection.get_array();
-        var arrit = arr.iterator();
-        catalogLoop: while (try arrit.next()) |next| {
-            var nxt = try @constCast(&next).get_object(); // drop const
-            var cidNode = nxt.find_field("catalogId") catch return error.NoCatalogId;
-            const cid = cidNode.get_int(u16) catch return error.NoCatalogId;
-            var totalNode = nxt.find_field("total") catch return error.NoTotal;
-            const total = totalNode.get_int(u16) catch return error.NoTotal;
-            var articlesNode = nxt.find_field("articles") catch return error.NoArticles;
-            var articlesit = (articlesNode.get_array() catch return error.NoArticles).iterator();
-            while (try articlesit.next()) |nextArticle| {
-                var nxtArticle = nextArticle;
-                var releaseDateNode = nxtArticle.find_field("releaseDate") catch return error.NoReleaseDate;
-                var titleNode = nxtArticle.find_field("title") catch return error.NoTitle;
-                var idNode = nxtArticle.find_field("id") catch return error.NoId;
-                const urlCopy = try allocator.dupe(u8, url);
-                errdefer allocator.free(urlCopy);
-                const title = titleNode.get_string_alloc([]u8, allocator) catch return error.NoTitle;
-                errdefer deinitTitle(allocator, title);
-                const anotherOne = Announce{
-                    .allocator = allocator,
-                    .url = urlCopy,
-                    .total = total,
-                    .releaseDate = releaseDateNode.get_int(i64) catch return error.NoReleaseDate,
-                    .catalogId = cid,
-                    .title = title,
-                    ._titleGc = true,
-                    .id = idNode.get_int(u32) catch return error.NoId,
-                };
-                try result.append(anotherOne);
-                continue :catalogLoop;
-            }
+        while (true) {
+            const next = arr.at(index) orelse break;
+            var nxt = try next.get_object();
+            // var nxt = try @constCast(&next).get_object(); // drop const
+            var cidNode = nxt.at_key("catalogId") orelse return error.NoCatalogId;
+            // var cidNode = nxt.find_field("catalogId") catch return error.NoCatalogId;
+            const cid = cidNode.get_int64() catch return error.NoCatalogId;
+            var totalNode = nxt.at_key("total") orelse return error.NoTotal;
+            const total = totalNode.get_int64() catch return error.NoTotal;
+            var articlesNode = nxt.at_key("articles") orelse return error.NoArticles;
+            var articlesit = (articlesNode.get_array() catch return error.NoArticles);
+            var nxtArticle = articlesit.at(0) orelse break;
+            var releaseDateNode = nxtArticle.at_key("releaseDate") orelse return error.NoReleaseDate;
+            var titleNode = nxtArticle.at_key("title") orelse return error.NoTitle;
+            var idNode = nxtArticle.at_key("id") orelse return error.NoId;
+            const urlCopy = try allocator.dupe(u8, url);
+            errdefer allocator.free(urlCopy);
+            const title = allocator.dupe(u8, try titleNode.get_string()) catch return error.NoTitle;
+            errdefer allocator.free(title);
+            const anotherOne = Announce{
+                .allocator = allocator,
+                .url = urlCopy,
+                .total = @intCast(total),
+                .releaseDate = releaseDateNode.get_int64() catch return error.NoReleaseDate,
+                .catalogId = @intCast(cid),
+                .title = title,
+                .id = @intCast(idNode.get_int64() catch return error.NoId),
+            };
+            try result.append(allocator, anotherOne);
+            index += 1;
         }
-        return result;
-    }
-
-    pub fn parsePartialResponse(allocator: std.mem.Allocator, url: []const u8, body: []const u8) ?Announce {
-        var result = Announce{
-            .allocator = allocator,
-            .url = url,
-            .total = 0,
-            .releaseDate = 0,
-            .catalogId = 0,
-            .title = "",
-            .id = 0,
-        };
-        const total = Announce.extractTotal(body) orelse {
-            std.log.debug("No total in update {s}", .{url});
-            return null;
-        };
-        const releaseDate = Announce.extractReleaseDate(body) orelse {
-            std.log.debug("No release date in update {s}", .{url});
-            return null;
-        };
-        const catalogId = Announce.extractCatalogId(body) orelse {
-            std.log.debug("No catalogId in update {s}", .{url});
-            return null;
-        };
-        const title = Announce.extractTitle(body) orelse {
-            std.log.debug("No title in update {s}", .{url});
-            return null;
-        };
-        const id = Announce.extractID(body) orelse {
-            std.log.debug("No id in update {s}", .{url});
-            return null;
-        };
-        result.total = total;
-        result.releaseDate = releaseDate;
-        result.catalogId = catalogId;
-        result.title = title;
-        result.id = id;
         return result;
     }
 
     pub fn deinit(self: *const Announce) void {
         self.allocator.free(self.url);
-        if (self._titleGc) {
-            deinitTitle(self.allocator, self.title);
-        }
+        self.allocator.free(self.title);
+        // if (self._titleGc) { // streaming parser hack
+        //     deinitTitle(self.allocator, self.title);
+        // }
     }
 
     // weird deinialization routine
-    fn deinitTitle(allocator: std.mem.Allocator, title: []const u8) void {
-        const start_ptr = title.ptr; // strange library allocation in parse_string_alloc
-        const len = title.len + 2;
-        const full_slice: []const u8 = @as([*]const u8, start_ptr)[0..len];
-        // Now free the memory using the adjusted slice
-        allocator.free(full_slice);
-    }
+    // fn deinitTitle(allocator: std.mem.Allocator, title: []const u8) void {
+    //     const start_ptr = title.ptr; // strange library allocation in parse_string_alloc
+    //     const len = title.len + 2;
+    //     const full_slice: []const u8 = @as([*]const u8, start_ptr)[0..len];
+    //     // Now free the memory using the adjusted slice
+    //     allocator.free(full_slice);
+    // }
 
     fn extractTotal(haystack: []const u8) ?u32 {
         const result = extractFirstOccurence(haystack, "\"total\":") orelse return null;
@@ -306,8 +264,8 @@ pub fn fetchDecodeLatestInEveryCatalog(allocator: std.mem.Allocator, easy: *cons
 }
 
 pub fn fetchDecodeLatestInCatalog(allocator: std.mem.Allocator, easy: *const curl.Easy, config: *const FetchParams) !?Announce {
-    const allArticles = try fetchDecodeLatestInEveryCatalog(allocator, easy, config);
-    defer allArticles.deinit();
+    var allArticles = try fetchDecodeLatestInEveryCatalog(allocator, easy, config);
+    defer allArticles.deinit(allocator);
     var result: ?Announce = null;
     for (allArticles.items) |article| {
         if (article.catalogId == config.catalogId) {
@@ -380,47 +338,17 @@ test "repeat pattern" {
     try expect(std.mem.eql(u8, pattern, "abcabc"));
 }
 
-test "parsing partial response" {
-    const alloc = std.testing.allocator;
-    {
-        const body = "{ \"title\": \"example title\", \"id\": 2, \"releaseDate\": 123, \"catalogId\": 23, \"total\": 10 }";
-        const fetchResult = Announce.parsePartialResponse(alloc, "", body) orelse unreachable;
-        try std.testing.expectEqualStrings("example title", fetchResult.title);
-        try std.testing.expectEqual(2, fetchResult.id);
-        try std.testing.expectEqual(123, fetchResult.releaseDate);
-        try std.testing.expectEqual(23, fetchResult.catalogId);
-        try std.testing.expectEqual(10, fetchResult.total);
-    }
-
-    {
-        const body = "{ \"other\": 123 }";
-        const fetchResult = Announce.parsePartialResponse(alloc, "", body);
-        try expect(fetchResult == null);
-    }
-}
-
 test "parsing total response" {
     const alloc = std.testing.allocator;
-    {
-        const body =
-            \\ {"code":"000000","messageDetail":null,"data":{"catalogs":[{"catalogId":48,"parentCatalogId":null,"catalogName":"New Cryptocurrency Listing","catalogType":1,"total":1819,"articles":[{"id":239914,"code":"80889caa7146492f9de2a2627fa30a4d","title":"Binance Futures Will Launch USDⓈ-Margined OLUSDT Perpetual Contract (2025-06-25)","type":1,"releaseDate":1750843841537}]}]}}
-        ;
-        const article = Announce.parsePartialResponse(alloc, "", body) orelse unreachable;
-        defer {
-            article.deinit();
-        }
-        try std.testing.expectEqual(48, article.catalogId);
-        try std.testing.expectEqual(1819, article.total);
-    }
 
     {
         const body = @embedFile("global-announces.json");
-        const fetchResult = try Announce.parseFirstEveryCatalog(alloc, "", body);
+        var fetchResult = try Announce.parseFirstEveryCatalog(alloc, "", body);
         defer {
             for (fetchResult.items) |article| {
                 article.deinit();
             }
-            fetchResult.deinit();
+            fetchResult.deinit(alloc);
         }
         try std.testing.expectEqual(8, fetchResult.items.len);
         const article = fetchResult.items[7];

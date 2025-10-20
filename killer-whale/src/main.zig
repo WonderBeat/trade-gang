@@ -145,10 +145,10 @@ pub fn main() !void {
     }
 
     if (std.posix.getenv("PASSIVE")) |_| {
-        std.log.info("Passive mode ON: mothership {}, mqtt {s}", .{ send_announce_address, mqtt_address });
+        std.log.info("Passive mode ON: mothership {any}, mqtt {s}", .{ send_announce_address, mqtt_address });
         for (0..1111) |_| {
             if (try passive_punch_mode(allocator, client, curl_module, 10_000, anonymizer, 1, send_announce_address, parse.Tld.Me)) |_| {
-                std.time.sleep(std.time.ns_per_s * 30); // cooldown
+                std.Thread.sleep(std.time.ns_per_s * 30); // cooldown
                 return;
             }
             _ = try client.ping();
@@ -219,9 +219,7 @@ pub fn main() !void {
                 //     try client.ping();
                 // }
                 if (iter % 13 == 0) {
-                    const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
-                    defer file.close();
-                    try metrics.writeMetrics(file.writer());
+                    try metrics.dumpToFile();
                 }
                 if (success) {
                     try curl_module.exchangeProxy();
@@ -233,7 +231,7 @@ pub fn main() !void {
                 }
                 timeSpentIoMs = std.time.milliTimestamp() - timeSpentIoMs;
                 const sleepRemaningMs: u64 = @intCast(@max(100, 2000 - timeSpentIoMs));
-                std.time.sleep(std.time.ns_per_ms * sleepRemaningMs); // cooldown
+                std.Thread.sleep(std.time.ns_per_ms * sleepRemaningMs); // cooldown
             }
             break :found null;
         };
@@ -242,10 +240,10 @@ pub fn main() !void {
             std.log.info("Update NOT found after direct punching", .{});
         } else {
             std.log.info("Update found as a result of a signal with proxy: {?s}", .{curl_module.proxyManager.getCurrentProxy()});
-            std.time.sleep(std.time.ns_per_min * 5);
+            std.Thread.sleep(std.time.ns_per_min * 5);
         }
         //try client.ping();
-        std.time.sleep(std.time.ns_per_s * 1);
+        std.Thread.sleep(std.time.ns_per_s * 1);
     }
 }
 
@@ -330,7 +328,7 @@ fn filterLastUnseenInList(articles: *const std.ArrayList(bin.Announce), unseenFi
 }
 
 fn fetchUpdate(allocator: std.mem.Allocator, curl_module: *const wcurl.Curl, config: *const bin.FetchParams, alreadySeenFilter: *fastfilter.BinaryFuse(u32)) !?bin.Announce {
-    const latestPerCatalog = bin.fetchDecodeLatestInEveryCatalog(allocator, &curl_module.easy, config) catch |errz| {
+    var latestPerCatalog = bin.fetchDecodeLatestInEveryCatalog(allocator, &curl_module.easy, config) catch |errz| {
         std.log.err("F: {s} with {?s}", .{ @errorName(errz), curl_module.proxyManager.getCurrentProxy() });
         metrics.err();
         if (errz == wcurl.CurlError.OperationTimedout) {
@@ -347,7 +345,7 @@ fn fetchUpdate(allocator: std.mem.Allocator, curl_module: *const wcurl.Curl, con
                 article.deinit();
             }
         }
-        latestPerCatalog.deinit();
+        latestPerCatalog.deinit(allocator);
     }
     unseen = try filterLastUnseenInList(&latestPerCatalog, alreadySeenFilter);
     std.log.debug("Found {d} articles in, {s} new", .{ latestPerCatalog.items.len, if (unseen != null) "1" else "nothing" });

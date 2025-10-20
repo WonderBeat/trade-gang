@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
   "packages": [
     "nodejs@24.2.0",
-    "zig@latest",
+    "github:NixOS/nixpkgs/nixos-unstable#zig",
     "odo@latest",
     "bun@latest",
     "k9s@latest",
@@ -12,7 +12,7 @@
     "docker-compose@latest",
     "kubectl@latest",
     "hurl@latest",
-    "aider-chat-with-browser@latest",
+    "zls@latest",
   ],
   "env": {
     "DEVBOX_COREPACK_ENABLED": "true",
@@ -25,6 +25,18 @@
       //  "npm install @google/gemini-cli"
     ],
     "scripts": {
+      "qwen": [
+        "GEMINI_SANDBOX=true ./node_modules/.bin/qwen",
+      ],
+      "qwen-acp": [
+        "GEMINI_SANDBOX=true ./node_modules/.bin/qwen --experimental-acp -m qwen3-coder-plus",
+      ],
+      "gemini": [
+        "GEMINI_SANDBOX=true ./node_modules/.bin/gemini --experimental-acp",
+      ],
+      "ai-cli-install": [
+        "corepack npm install @qwen-code/qwen-code@latest @google/gemini-cli@latest",
+      ],
       "test": [
         "echo \"Error: no test specified\" && exit 1",
       ],

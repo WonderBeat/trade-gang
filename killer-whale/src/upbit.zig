@@ -40,7 +40,7 @@ pub fn main() !void {
     };
 
     const intervalMs = try std.fmt.parseInt(u32, std.posix.getenv("INTERVAL") orelse "7000", 0);
-    const webDomain = std.posix.getenv("DOMAIN") orelse "https://api-manager.upbit.com";
+    const webDomain = std.posix.getenv("DOMAIN") orelse "https://api-manager.upbit.com.";
 
     const send_announce_address = try resolve_address(std.posix.getenv("MOTHERSHIP") orelse {
         std.log.err("Mothership address required", .{});
@@ -67,7 +67,6 @@ pub fn main() !void {
     const iterations = if (is_debug) 150 else (500 + seed % 500);
     var latestID: u32 = 0;
     var totalCount: u32 = 0;
-    var buf: [1000]u8 = undefined;
     var urlBuf: [300]u8 = undefined;
     std.debug.print("Seed: {d} Iterations: {d}\n", .{ seed, iterations });
     var rateReducer: u32 = 1;
@@ -110,7 +109,7 @@ pub fn main() !void {
                 try dropReplaceProxy(httpClient);
                 if (httpClient.proxyManager.size() == 0) {
                     std.log.warn("Rate limited", .{});
-                    std.time.sleep(std.time.ns_per_min * 10); // banned and has no other proxies
+                    std.Thread.sleep(std.time.ns_per_min * 10); // banned and has no other proxies
                 }
             } else {
                 std.log.warn("Call {d}: {s} ", .{ result.status_code, url });
@@ -135,7 +134,7 @@ pub fn main() !void {
         std.debug.assert(id > 0);
         metrics.hit();
         if (latestID == 0) {
-            const announce = try extractAnnounce(allocator, body, &buf);
+            const announce = try extractAnnounce(allocator, body);
             std.log.info("Preflight test", .{});
             std.log.info("Latest announce ID {d} title {s}, releaseDate {d}", .{
                 announce.id,
@@ -149,7 +148,7 @@ pub fn main() !void {
             latestID = id;
             totalCount = announce.total;
         } else if (id != latestID) {
-            var announce = try extractAnnounce(allocator, body, &buf);
+            var announce = try extractAnnounce(allocator, body);
             announce.url = url;
             announce.total = id;
             _ = try messaging.sendAnnounce(allocator, send_announce_address, &announce);
@@ -178,7 +177,7 @@ pub fn main() !void {
             totalCount = announce.total;
         }
         try collectQueryMetrics(httpClient, seed % (10000 / intervalMs) == 0);
-        const etag = try result.getHeader("etag") orelse return error.NoETag;
+        const etag = try result.curl_response.getHeader("etag") orelse return error.NoETag;
         try httpClient.initHeaders(.{ .etag = etag.get() });
         const execTime = sleepRemaning(startIterationTs, intervalMs * rateReducer);
         std.log.debug("Call {d} ({d}): {s} ", .{ result.status_code, execTime, url });
@@ -204,46 +203,44 @@ fn dropReplaceProxy(httpClient: *wcurl.Curl) !void {
 fn sleepRemaning(startIterationTs: i64, intervalTimeMs: u32) i64 {
     const timeTaken = std.time.milliTimestamp() - startIterationTs;
     const sleepRemaningMs: u64 = @intCast(@max(1000, intervalTimeMs - timeTaken));
-    std.time.sleep(std.time.ns_per_ms * sleepRemaningMs); // cooldown
+    std.Thread.sleep(std.time.ns_per_ms * sleepRemaningMs); // cooldown
     return timeTaken;
 }
 
 // json parsing basically
-fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8, buf: []u8) !binance.Announce {
-    const stream = std.io.fixedBufferStream(body);
-    var src = std.io.StreamSource{ .const_buffer = stream };
-    var parser = try simdjzon.ondemand.Parser.init(&src, allocator, "<s>", .{});
+fn extractAnnounce(allocator: std.mem.Allocator, body: []const u8) !binance.Announce {
+    var parser = try simdjzon.dom.Parser.initFixedBuffer(allocator, body, .{});
     defer parser.deinit();
-    var doc = try parser.iterate();
-    var totalCountNode = try doc.at_pointer("/data/total_count");
-    const totalCount = try totalCountNode.get_int(u32);
-    var dataSection = try doc.at_pointer("/data/notices");
-    var first_element: simdjzon.ondemand.Value = (try @constCast(&(try dataSection.get_array())).at(0)) orelse return error.NoFirstElement;
-    var listedAtNode = try first_element.find_field("listed_at");
-    const listedAt = try listedAtNode.get_string([]u8, buf);
+    try parser.parse();
+    var totalCountNode = try parser.element().at_pointer("/data/total_count");
+    const totalCount = try totalCountNode.get_uint64();
+    var dataSection = try parser.element().at_pointer("/data/notices");
+    var first_element = (try dataSection.get_array()).at(0) orelse return error.NoFirstElement;
+    var listedAtNode = first_element.at_key("listed_at") orelse return error.NoListedAt;
+    const listedAt = try listedAtNode.get_string();
     const timestamp = (try zeit.instant(.{
         .source = .{
             .iso8601 = listedAt,
         },
     })).unixTimestamp();
-    var categoryNode = try first_element.find_field("category");
-    const category = try categoryNode.get_string([]u8, buf);
+    var categoryNode = first_element.at_key("category") orelse return error.NoCategory;
+    const category = try categoryNode.get_string();
     var categoryNum: u16 = 888;
     if (std.mem.eql(u8, category, "Trade") or std.mem.eql(u8, category, "거래")) {
         categoryNum = 777;
     }
-    var titleNode = try first_element.find_field("title");
-    const title = try titleNode.get_string([]u8, buf);
-    var idNode = try first_element.find_field("id");
-    const id = try idNode.get_int(u32);
+    var titleNode = first_element.at_key("title") orelse return error.NoTitle;
+    const title = try titleNode.get_string();
+    var idNode = first_element.at_key("id") orelse return error.NoID;
+    const id = try idNode.get_int64();
     std.debug.assert(id > 0 and title.len > 0 and timestamp > 0);
     return binance.Announce{
         .allocator = allocator,
         .releaseDate = timestamp,
         .catalogId = categoryNum,
-        .title = title,
-        .id = id,
-        .total = totalCount,
+        .title = try allocator.dupe(u8, title),
+        .id = @intCast(id),
+        .total = @intCast(totalCount),
         .url = "",
     };
 }
@@ -334,8 +331,8 @@ test "parse date" {
 test "parse announce" {
     const body = @embedFile("upbit-announce.json");
     const alloc = std.testing.allocator;
-    var buf: [200]u8 = undefined;
-    const announce = try extractAnnounce(alloc, body, &buf);
+    const announce = try extractAnnounce(alloc, body);
+    defer announce.deinit();
     try std.testing.expectEqualStrings("업비트 코인빌리기 - 테더(USDT) 지원 종료 안내", announce.title);
     try std.testing.expectEqual(5373, announce.id);
     try std.testing.expectEqual(1753701007, announce.releaseDate);

@@ -57,12 +57,14 @@ pub fn initializeMetrics(comptime opts: m.RegistryOpts) !void {
 }
 
 // thread safe
-pub fn writeMetrics(writer: anytype) !void {
+pub fn writeMetrics(writer: *std.Io.Writer) !void {
     return m.write(&metrics, writer);
 }
 
 pub fn dumpToFile() !void {
     const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
     defer file.close();
-    try writeMetrics(file.writer());
+    var buffer: [500]u8 = undefined;
+    var writer = file.writer(&buffer).interface;
+    try writeMetrics(&writer);
 }

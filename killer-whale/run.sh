@@ -8,4 +8,4 @@
 
 #QUERY_TIMEOUT=5000 INTERVAL=1000 PROXY_LIST="http://127.0.0.1:8880/random-self-managed-proxies?count=10" DOMAIN="https://upbit.gladiators.dev" MOTHERSHIP="127.0.0.1:8081" time -l ./zig-out/bin/upbit
 
-#QUERY_TIMEOUT=3000 socks_proxy="socks5://10.88.101.77:1080" INTERVAL=1000 DOMAIN="https://upbit.gladiators.dev" MOTHERSHIP="127.0.0.1:8081" time -l ./zig-out/bin/upbit
+QUERY_TIMEOUT=3000 socks_proxy="socks5://10.88.101.77:1080" INTERVAL=1000 DOMAIN="https://upbit.gladiators.dev" MOTHERSHIP="127.0.0.1:8081" time -l ./zig-out/bin/upbit

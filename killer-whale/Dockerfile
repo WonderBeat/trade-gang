@@ -2,7 +2,7 @@ FROM --platform=$BUILDPLATFORM debian:bookworm
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ARG ZIG_VERSION=0.14.1
+ARG ZIG_VERSION=0.15.1
 WORKDIR /usr/src
 
 RUN apt-get update && \

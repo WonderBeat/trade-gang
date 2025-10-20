@@ -58,14 +58,12 @@ pub fn punchNotify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce
             }
         }
         if (iter % 13 == 0) {
-            const file = try std.fs.cwd().createFile("metrics.prometheus", .{});
-            defer file.close();
-            try prometheus.writeMetrics(file.writer());
+            try prometheus.dumpToFile();
         }
         try curl_cli.exchangeProxy();
         time_spent_query = std.time.milliTimestamp() - time_spent_query;
         const sleep_remaning: u64 = @intCast(@max(50, config.sleep - time_spent_query));
-        std.time.sleep(sleep_remaning * std.time.ns_per_ms);
+        std.Thread.sleep(sleep_remaning * std.time.ns_per_ms);
     }
     if (maybe_update) |update| no_update: {
         defer update.deinit();
@@ -75,9 +73,9 @@ pub fn punchNotify(allocator: std.mem.Allocator, curl_cli: *wcurl.Curl, announce
         }
         const ts = std.time.timestamp();
         std.log.info("Timestamps: ours {d} announcement {d}, diff: {d}", .{ ts, update.releaseDate, ts - @divFloor(update.releaseDate, 1000) });
-        const bytesCount = messaging.sendAnnounce(allocator, announce_url, &update) catch 0;
-        std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ update.id, bytesCount });
-        return bytesCount > 0;
+        const bytes_count = messaging.sendAnnounce(allocator, announce_url, &update) catch 0;
+        std.log.info("Announce sent {d} ({d} bytes). Sleeping...", .{ update.id, bytes_count });
+        return bytes_count > 0;
     }
     return false;
 }

@@ -7,9 +7,9 @@ pub const ProxyManager = struct {
     current_index: usize,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) ProxyManager {
+    pub fn init(allocator: std.mem.Allocator) !ProxyManager {
         return ProxyManager{
-            .proxies = ArrayList([:0]const u8).init(allocator),
+            .proxies = try ArrayList([:0]const u8).initCapacity(allocator, 10),
             .current_index = 0,
             .allocator = allocator,
         };
@@ -19,7 +19,7 @@ pub const ProxyManager = struct {
         for (self.proxies.items) |proxy| {
             self.allocator.free(proxy);
         }
-        self.proxies.deinit();
+        self.proxies.deinit(self.allocator);
     }
 
     pub fn isEmpty(self: *const ProxyManager) bool {
@@ -30,42 +30,45 @@ pub const ProxyManager = struct {
         for (self.proxies.items) |proxy| {
             self.allocator.free(proxy);
         }
-        self.proxies.clearAndFree();
+        self.proxies.clearAndFree(self.allocator);
     }
 
     pub fn loadFromFile(self: *ProxyManager, file_path: []const u8) !usize {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
-        var buf_reader = std.io.bufferedReader(file.reader());
-        const reader = buf_reader.reader();
-        return try self.loadFromReader(&reader);
+        var buffer: [2048]u8 = undefined;
+        var reader = file.reader(&buffer);
+        return try self.loadFromReader(&reader.interface);
     }
 
     pub fn loadFromUrl(self: *ProxyManager, url: [:0]const u8) !usize {
         const ca_bundle = try curl.allocCABundle(self.allocator);
         defer ca_bundle.deinit();
-        const easy = try curl.Easy.init(self.allocator, .{
+        const easy = try curl.Easy.init(.{
             .ca_bundle = ca_bundle,
             .default_timeout_ms = 2000,
         });
         defer easy.deinit();
-        const response = easy.get(url) catch |errz| {
+        var buffer: [2048]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&buffer);
+        const response = easy.fetch(url, .{ .writer = &writer }) catch |errz| {
             std.log.err("Failed to get proxy list from url: {s}", .{url});
             return errz;
         };
-        defer response.deinit();
-        const body_buffer = response.body orelse return error.NoBody;
-        var stream = std.io.fixedBufferStream(body_buffer.items);
-        return try self.loadFromReader(&stream.reader());
+        std.debug.assert(response.status_code >= 200 and response.status_code < 400);
+        var stream = std.Io.Reader.fixed(writer.buffered());
+        return try self.loadFromReader(&stream);
     }
 
-    pub fn loadFromReader(self: *ProxyManager, reader: anytype) !usize {
-        var buffer: [100]u8 = undefined;
-        while (try reader.readUntilDelimiterOrEof(&buffer, '\n')) |line| {
-            if (line.len == 0) continue;
-            const zeroTermitaned = try std.fmt.allocPrintZ(self.allocator, "{s}", .{line});
-            try self.proxies.append(zeroTermitaned);
+    pub fn loadFromReader(self: *ProxyManager, reader: *std.Io.Reader) !usize {
+        while (true) {
+            const line = reader.takeDelimiterExclusive('\n') catch {
+                return self.proxies.items.len;
+            };
+            if (line.len < 2) continue; // skip empty lines
+            const zeroTermitaned = try std.fmt.allocPrintSentinel(self.allocator, "{s}", .{line}, 0);
+            try self.proxies.append(self.allocator, zeroTermitaned);
         }
         return self.proxies.items.len;
     }
@@ -99,33 +102,33 @@ pub const ProxyManager = struct {
 const testing = std.testing;
 
 test "ProxyManager init and deinit" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
     try testing.expectEqual(@as(usize, 0), pm.proxies.items.len);
     try testing.expectEqual(@as(usize, 0), pm.current_index);
 }
 
 test "ProxyManager isEmpty" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
     try testing.expect(pm.isEmpty());
 
     const proxy = try testing.allocator.dupeZ(u8, "http://localhost:8080");
-    try pm.proxies.append(proxy);
+    try pm.proxies.append(testing.allocator, proxy);
 
     try testing.expect(!pm.isEmpty());
 }
 
 test "ProxyManager clear" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
     // Add some proxies
     const proxy1 = try testing.allocator.dupeZ(u8, "http://localhost:8080");
     const proxy2 = try testing.allocator.dupeZ(u8, "http://localhost:8081");
-    try pm.proxies.append(proxy1);
-    try pm.proxies.append(proxy2);
+    try pm.proxies.append(testing.allocator, proxy1);
+    try pm.proxies.append(testing.allocator, proxy2);
 
     try testing.expectEqual(@as(usize, 2), pm.proxies.items.len);
 
@@ -136,29 +139,29 @@ test "ProxyManager clear" {
 }
 
 test "ProxyManager size" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
     try testing.expectEqual(@as(usize, 0), pm.size());
 
     const proxy1 = try testing.allocator.dupeZ(u8, "http://localhost:8080");
     const proxy2 = try testing.allocator.dupeZ(u8, "http://localhost:8081");
-    try pm.proxies.append(proxy1);
-    try pm.proxies.append(proxy2);
+    try pm.proxies.append(testing.allocator, proxy1);
+    try pm.proxies.append(testing.allocator, proxy2);
 
     try testing.expectEqual(@as(usize, 2), pm.size());
 }
 
 test "ProxyManager getNextProxy" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
     try testing.expect(pm.getNextProxy() == null);
 
     const proxy1 = try testing.allocator.dupeZ(u8, "http://localhost:8080");
     const proxy2 = try testing.allocator.dupeZ(u8, "http://localhost:8081");
-    try pm.proxies.append(proxy1);
-    try pm.proxies.append(proxy2);
+    try pm.proxies.append(testing.allocator, proxy1);
+    try pm.proxies.append(testing.allocator, proxy2);
 
     try testing.expectEqualStrings("http://localhost:8081", pm.getNextProxy().?);
     try testing.expectEqualStrings("http://localhost:8080", pm.getNextProxy().?);
@@ -166,22 +169,22 @@ test "ProxyManager getNextProxy" {
 }
 
 test "ProxyManager getCurrentProxy" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
     try testing.expect(pm.getCurrentProxy() == null);
 
     const proxy1 = try testing.allocator.dupeZ(u8, "http://localhost:8080");
     const proxy2 = try testing.allocator.dupeZ(u8, "http://localhost:8081");
-    try pm.proxies.append(proxy1);
-    try pm.proxies.append(proxy2);
+    try pm.proxies.append(testing.allocator, proxy1);
+    try pm.proxies.append(testing.allocator, proxy2);
 
     _ = pm.getNextProxy().?; // Advance to proxy2
     try testing.expectEqualStrings("http://localhost:8081", pm.getCurrentProxy().?);
 }
 
 test "ProxyManager dropCurrent" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
     // Should not crash on empty list
@@ -190,9 +193,9 @@ test "ProxyManager dropCurrent" {
     const proxy1 = try testing.allocator.dupeZ(u8, "http://localhost:8080");
     const proxy2 = try testing.allocator.dupeZ(u8, "http://localhost:8081");
     const proxy3 = try testing.allocator.dupeZ(u8, "http://localhost:8082");
-    try pm.proxies.append(proxy1);
-    try pm.proxies.append(proxy2);
-    try pm.proxies.append(proxy3);
+    try pm.proxies.append(testing.allocator, proxy1);
+    try pm.proxies.append(testing.allocator, proxy2);
+    try pm.proxies.append(testing.allocator, proxy3);
 
     _ = pm.getNextProxy().?; // Advance to proxy2
     try testing.expectEqualStrings("http://localhost:8081", pm.getCurrentProxy().?);
@@ -204,7 +207,7 @@ test "ProxyManager dropCurrent" {
 }
 
 test "ProxyManager loadFromFile" {
-    var pm = ProxyManager.init(testing.allocator);
+    var pm = try ProxyManager.init(testing.allocator);
     defer pm.deinit();
 
     // Create a temporary test file

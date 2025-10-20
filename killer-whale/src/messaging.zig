@@ -10,17 +10,17 @@ pub fn sendAnnounce(allocator: std.mem.Allocator, address: std.net.Address, anno
     const coins = try parse.extractCoins(allocator, announce.title);
     defer allocator.free(coins);
     const isImportant = parse.isAnnounceImportant(announce.title) >= 3;
-    var array = std.ArrayList(protobuf.ManagedString).init(allocator);
-    defer array.deinit();
-    for (coins) |token| {
-        try array.append(protobuf.ManagedString.managed(token));
-    }
-    const managed_title = protobuf.ManagedString.managed(announce.title);
+    // var array = std.ArrayList([]const u8).initCapacity(allocator, 5);
+    // defer array.deinit(allocator);
+    const array = std.ArrayList([]const u8).fromOwnedSlice(coins[0..]);
+    // for (coins) |token| {
+    //     try array.append(allocator, token);
+    // }
     const announceProto = protos.Announcement{
         .ts = @intCast(announce.releaseDate), //
         .tokens = array,
         .catalog = announce.catalogId,
-        .title = managed_title,
+        .title = announce.title,
         .call_to_action = isImportant,
     };
 
@@ -30,10 +30,13 @@ pub fn sendAnnounce(allocator: std.mem.Allocator, address: std.net.Address, anno
     defer posix.close(socket);
     try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
-    const byteArray = try announceProto.encode(allocator);
-    std.debug.assert(byteArray.len < 1300);
-    defer allocator.free(byteArray);
+    var writer = try std.Io.Writer.Allocating.initCapacity(allocator, 500);
+    errdefer writer.deinit();
+    try announceProto.encode(&writer.writer, allocator);
+    var byteArray = writer.toArrayList();
+    defer byteArray.deinit(allocator);
+    std.debug.assert(byteArray.items.len < 1300);
 
-    const send_bytes = try posix.send(socket, byteArray, 0);
+    const send_bytes = try posix.send(socket, byteArray.items, 0);
     return send_bytes;
 }
