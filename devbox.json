@@ -31,6 +31,9 @@
       "qwen-acp": [
         "GEMINI_SANDBOX=true ./node_modules/.bin/qwen --experimental-acp -m qwen3-coder-plus",
       ],
+      "glm-acp": [
+        "GEMINI_SANDBOX=true ./node_modules/.bin/qwen --experimental-acp -m GLM-4.6",
+      ],
       "gemini": [
         "GEMINI_SANDBOX=true ./node_modules/.bin/gemini --experimental-acp",
       ],

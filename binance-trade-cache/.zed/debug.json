@@ -1,0 +1,26 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "adapter": "CodeLLDB",
+    "label": "Zig App DEBUG",
+    //"type": "lldb",
+    "request": "launch",
+    "program": "./zig-out/bin/app",
+    "build": {
+      //"type": "shell",
+      "command": "zig build --release=safe"
+    }
+  },
+  {
+    "adapter": "CodeLLDB",
+    "label": "ZIG Debug Tests",
+    "request": "launch",
+    "program": "./zig-out/bin/test",
+    "build": {
+      "command": "zig build test -Donly-binary"
+    }
+  }
+]
