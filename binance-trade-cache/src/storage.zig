@@ -14,7 +14,7 @@ pub const StreamUpdate = struct {
     pair: Pair,
 };
 
-pub fn generatePairsFromStrings(allocator: std.mem.Allocator, strings: []const []const u8) ![]Pair {
+pub fn generateSymbolsFromStrings(allocator: std.mem.Allocator, strings: []const []const u8) ![]Pair {
     var pairs = try allocator.alloc(Pair, strings.len);
 
     for (strings, 0..) |str, i| {
@@ -200,7 +200,7 @@ test "Storage with multiple buckets" {
 
 test "generatePairsFromStrings creates pairs from string array" {
     const strings = [_][]const u8{ "BTCUSDT", "ETHUSDT", "BNBUSDT" };
-    const pairs = try generatePairsFromStrings(std.testing.allocator, &strings);
+    const pairs = try generateSymbolsFromStrings(std.testing.allocator, &strings);
     defer std.testing.allocator.free(pairs);
 
     try std.testing.expectEqual(@as(usize, 3), pairs.len);

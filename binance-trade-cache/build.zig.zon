@@ -82,7 +82,7 @@
             .url = "git+https://github.com/travisstaloch/simdjzon#7c586bada71603a3a28e0f63dbb81cfd5dbb4619",
             .hash = "simdjzon-0.0.1-7uNSgHJ_BQDkK6pvdhXPjeGkqSxQw_hy7TlA1USZ7Ala",
         },
-        .dusty = .{ .path = "../../dusty" },
+        //.dusty = .{ .path = "../../dusty" },
         // .dusty = .{
         //     .url = "git+https://github.com/lalinsky/dusty#9eeae8c8ee5fa9acc4377389c5d95ed960d65fd0",
         //     .hash = "dusty-0.0.0-Qdw7RtxoBwASpcjn0hJqV_4Jm8e0pijeW6mmp3d3FZTK",

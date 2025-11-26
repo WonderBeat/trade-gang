@@ -10,6 +10,56 @@ const spot_endpoint = "https://api2.binance.com";
 pub const futures_exchange_info_url = std.fmt.comptimePrint("{s}/fapi/v1/exchangeInfo", .{futures_endpoint});
 pub const spot_exchange_info_url = std.fmt.comptimePrint("{s}/api/v3/exchangeInfo", .{spot_endpoint});
 
+pub fn extractDataSectionFromJson(json_str: []const u8) ![]const u8 {
+    const data_key_start = std.mem.indexOf(u8, json_str, "\"data\":") orelse return error.DataKeyNotFound;
+    var brace_pos: usize = data_key_start + 7; // Skip past "\"data\":"
+    // find {
+    while (brace_pos < json_str.len and (json_str[brace_pos] == ' ' or json_str[brace_pos] == '\t' or json_str[brace_pos] == '\n' or json_str[brace_pos] == '\r')) : (brace_pos += 1) {}
+    if (brace_pos >= json_str.len or json_str[brace_pos] != '{') {
+        return error.DataObjectNotFound;
+    }
+    const data_start = brace_pos;
+    var brace_count: usize = 1;
+    var pos = data_start + 1;
+    var in_string = false;
+    var escape_next = false;
+    while (pos < json_str.len and brace_count > 0) {
+        const char = json_str[pos];
+
+        if (escape_next) {
+            escape_next = false;
+            pos += 1;
+            continue;
+        }
+
+        if (char == '\\') {
+            escape_next = true;
+            pos += 1;
+            continue;
+        }
+
+        if (char == '"') {
+            in_string = !in_string;
+            pos += 1;
+            continue;
+        }
+
+        if (!in_string) {
+            if (char == '{') {
+                brace_count += 1;
+            } else if (char == '}') {
+                brace_count -= 1;
+                if (brace_count == 0) {
+                    return json_str[data_start .. pos + 1];
+                }
+            }
+        }
+
+        pos += 1;
+    }
+    return error.UnmatchedBraces;
+}
+
 pub fn buildCombinedStreamUrlParams(
     allocator: std.mem.Allocator,
     pairs: []const storage.Pair,
@@ -59,7 +109,7 @@ pub fn httpGetBody(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     // return parsed;
 }
 
-pub fn findPairsForTradeTracking(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
+pub fn findSymbolsForTradeTracking(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
     const future_exchange_inf = try httpGetBody(allocator, futures_exchange_info_url);
     defer allocator.free(future_exchange_inf);
     var future_pairs = try extractAlivePairs(allocator, future_exchange_inf);
@@ -310,4 +360,22 @@ test "intersectPairs returns intersection of two pair lists" {
     for (intersection.items, expected) |actual, exp| {
         try std.testing.expect(std.mem.eql(u8, actual, exp));
     }
+}
+
+test "extractDataFromJson extracts data object correctly" {
+    const json_str = "{\"stream\":\"kiteusdt@trade\",\"data\":{\"e\":\"trade\",\"E\":1764079443353,\"T\":1764079443353,\"s\":\"KITEUSDT\",\"t\":57635348,\"p\":\"0.1006800\",\"q\":\"55\",\"X\":\"MARKET\",\"m\":true}}";
+
+    const expected_data = "{\"e\":\"trade\",\"E\":1764079443353,\"T\":1764079443353,\"s\":\"KITEUSDT\",\"t\":57635348,\"p\":\"0.1006800\",\"q\":\"55\",\"X\":\"MARKET\",\"m\":true}";
+
+    const extracted_data = try extractDataSectionFromJson(json_str);
+    try std.testing.expect(std.mem.eql(u8, expected_data, extracted_data));
+}
+
+test "extractDataFromJson handles nested objects" {
+    const json_str = "{\"stream\":\"btcusdt@trade\",\"data\":{\"e\":\"trade\",\"E\":1234567890,\"s\":\"BTCUSDT\",\"p\":\"50000.00\",\"trader\":{\"id\":123,\"name\":\"test\"},\"m\":false}}";
+
+    const expected_data = "{\"e\":\"trade\",\"E\":1234567890,\"s\":\"BTCUSDT\",\"p\":\"50000.00\",\"trader\":{\"id\":123,\"name\":\"test\"},\"m\":false}";
+
+    const extracted_data = try extractDataSectionFromJson(json_str);
+    try std.testing.expect(std.mem.eql(u8, expected_data, extracted_data));
 }

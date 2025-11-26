@@ -35,10 +35,8 @@ pub fn build(b: *std.Build) void {
 
     const zio = b.dependency("zio", .{ .target = target, .optimize = optimize });
     const simdjzon = b.dependency("simdjzon", .{ .target = target, .optimize = optimize });
-    const dusty = b.dependency("dusty", .{ .target = target, .optimize = optimize });
     exe.root_module.addImport("zio", zio.module("zio"));
     exe.root_module.addImport("simdjzon", simdjzon.module("simdjzon"));
-    exe.root_module.addImport("dusty", dusty.module("dusty"));
     // const tardy = b.dependency("tardy", .{ .target = target, .optimize = optimize }).module("tardy");
     // exe.root_module.addImport("tardy", tardy);
 
@@ -73,7 +71,6 @@ pub fn build(b: *std.Build) void {
     unit_tests.root_module.addImport("zio", zio.module("zio"));
     unit_tests.root_module.addImport("websocket", websocket.module("websocket"));
     unit_tests.root_module.addImport("simdjzon", simdjzon.module("simdjzon"));
-    unit_tests.root_module.addImport("dusty", dusty.module("dusty"));
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_binary = b.addInstallArtifact(unit_tests, .{});

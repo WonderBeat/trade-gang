@@ -10,6 +10,7 @@ const tape = @import("string-tape.zig");
 const zio = @import("zio");
 const storage = @import("storage.zig");
 const server = @import("web-server.zig");
+const bind = @import("fn-binding.zig");
 
 const URI = "fstream.binance.com";
 const IS_TLS = true;
@@ -35,7 +36,7 @@ pub const std_options = std.Options{
     },
 };
 
-const aggTradeMarker =
+const AGG_TRADE =
     \\"e":"aggTrade"
 ;
 
@@ -82,6 +83,26 @@ fn storageRoutine(
     }
 }
 
+fn retryingWebsocketStreamCollector(
+    rt: *zio.Runtime,
+    pairs: []const storage.Pair,
+    update_channel: *zio.Channel(storage.StreamUpdate),
+    shutdown: *std.atomic.Value(bool),
+) !void {
+    while (true) {
+        websocketStreamCollector(rt, pairs, update_channel, shutdown) catch |err| {
+            if (err == zio.Cancelable.Canceled) {
+                std.log.info("Task cancelled", .{});
+            } else {
+                std.log.info("Unexpected err {}", .{err});
+                return err;
+            }
+        };
+        std.log.warn("Collector stopped. Restarting...", .{});
+        try rt.sleep(2000);
+    }
+}
+
 fn websocketStreamCollector(
     rt: *zio.Runtime,
     pairs: []const storage.Pair,
@@ -95,7 +116,9 @@ fn websocketStreamCollector(
         try pair_map.put(pair.name, pair);
     }
 
-    const stream_path = try binance.buildCombinedStreamUrlParams(rt.allocator, pairs, .{});
+    const stream_path = try binance.buildCombinedStreamUrlParams(rt.allocator, pairs, .{
+        .stream_type = "@trade",
+    });
     defer rt.allocator.free(stream_path);
 
     var client = try websockets.asyncClient(rt, .{
@@ -107,11 +130,10 @@ fn websocketStreamCollector(
     defer {
         client.close(.{ .code = 4002 }) catch unreachable;
         client.deinit();
-        std.log.warn("Collector stopped", .{});
     }
     std.log.info("WebSocket client initialized. Connecting to {s}:{d}...", .{ URI, PORT });
     try client.handshake(stream_path, .{
-        .timeout_ms = 3000,
+        .timeout_ms = 10000,
         .headers = std.fmt.comptimePrint("Host: {s}\r\nOrigin: {s}", .{ URI, URI }),
     });
 
@@ -124,48 +146,57 @@ fn websocketStreamCollector(
     var tape_ring_buf = tape.StringTape.init(tape_buffer);
     var updates_count: usize = 0;
     while (msg) |message| {
-        defer client.done(message);
-        if (builtin.mode == .Debug and shutdown.load(.acquire)) {
-            std.log.debug("Shutdown signal received. Exiting", .{});
-            break;
-        }
-        switch (message.type) {
-            .text => {
-                //std.log.info("Received update: {s}", .{message.data});
-                std.debug.assert(std.mem.containsAtLeast(u8, message.data, 1, aggTradeMarker));
-                const pair_name = try binance.extractSymbolFromAggTrade(message.data);
-                const found_pair = pair_map.get(pair_name);
-                if (found_pair) |pair| {
-                    const timestamp = try binance.extractTimestampFromAggTrade(message.data);
-                    const update = storage.StreamUpdate{
-                        .timestamp = timestamp,
-                        .pair = pair,
-                        .data = try tape_ring_buf.write(message.data),
-                    };
-                    try update_channel.send(rt, update);
-                    if (builtin.mode == .Debug) {
+        {
+            defer client.done(message);
+            if (builtin.mode == .Debug and shutdown.load(.acquire)) {
+                std.log.debug("Shutdown signal received. Exiting", .{});
+                break;
+            }
+            switch (message.type) {
+                .text => {
+                    // std.log.info("Received update: {s}", .{message.data});
+                    //std.debug.assert(std.mem.containsAtLeast(u8, message.data, 1, AGG_TRADE));
+                    const pair_name = try binance.extractSymbolFromAggTrade(message.data);
+                    const found_pair = pair_map.get(pair_name);
+                    if (found_pair) |pair| {
+                        const timestamp = try binance.extractTimestampFromAggTrade(message.data);
+                        const data_section = try binance.extractDataSectionFromJson(message.data);
+
+                        const update = storage.StreamUpdate{
+                            .timestamp = timestamp,
+                            .pair = pair,
+                            .data = try tape_ring_buf.write(data_section),
+                        };
+                        try update_channel.send(rt, update);
                         updates_count += 1;
-                        if (updates_count % 1000 == 0) {
-                            std.log.info("WS consumed {d} updates, exiting", .{updates_count});
-                            try rt.sleep(500); // so consumer can process events queue
-                            return;
+                        if (builtin.mode == .Debug) {
+                            if (updates_count % 1000 == 0) {
+                                std.log.info("WS consumed {d} updates, exiting", .{updates_count});
+                                try rt.sleep(500); // so consumer can process events queue
+                                return;
+                            }
                         }
+                    } else {
+                        std.log.debug("Received update for pair {s} which is not in our tracking list", .{pair_name});
                     }
-                } else {
-                    std.log.debug("Received update for pair {s} which is not in our tracking list", .{pair_name});
-                }
-            },
-            .ping => {
-                std.log.debug("Received ping message", .{});
-                const now = std.time.milliTimestamp();
-                if (last_ping + 60 * std.time.ms_per_s < now) {
-                    std.log.debug("Sending PONG", .{});
-                    try client.writePong(message.data);
-                    last_ping = now;
-                }
-            },
-            .pong => std.log.info("Received pong message", .{}),
-            else => std.log.err("Received unsupported message type {}", .{message}),
+                },
+                .ping => {
+                    std.log.debug("Received ping message", .{});
+                    const now = std.time.milliTimestamp();
+                    if (last_ping + 30 * std.time.ms_per_s < now) {
+                        std.log.info("Updates processed {d}", .{updates_count});
+                        std.log.debug("Sending PONG", .{});
+                        try client.writePong(message.data);
+                        last_ping = now;
+                    }
+                },
+                .pong => std.log.info("Received pong message", .{}),
+                .close => {
+                    std.log.err("Received close message. Last ping was at {d}", .{last_ping});
+                    return;
+                },
+                else => std.log.err("Received unsupported message type {} [{s}]", .{ message, message.data }),
+            }
         }
         msg = try client.read();
     } else {
@@ -178,37 +209,37 @@ pub fn main() !void {
         .never_unmap = true,
         .retain_metadata = true,
         .verbose_log = false,
-        .backing_allocator_zeroes = false,
+        .backing_allocator_zeroes = true,
     }){};
     defer std.debug.assert(debug_allocator.deinit() == .ok);
     const allocator, const is_debug = gpa: {
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
             //.ReleaseFast, .ReleaseSmall => .{ @constCast(&std.heap.stackFallback(4096 * 3, std.heap.c_allocator)).get(), false },
-            //.ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
-            .ReleaseFast, .ReleaseSmall => .{ debug_allocator.allocator(), false },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
+            //.ReleaseFast, .ReleaseSmall => .{ debug_allocator.allocator(), false },
         };
     };
     if (!is_debug) {
         try metrics.initializeMetrics(.{ .prefix = "binance_tradecache_" });
     }
-    var runtime = try zio.Runtime.init(allocator, .{ .num_executors = 1, .thread_pool = .{ .max_threads = 1 } });
-    defer runtime.deinit();
+
     var buffer: [STREAM_UPDATE_BUFFER_SIZE]storage.StreamUpdate = undefined;
     var update_channel = zio.Channel(storage.StreamUpdate).init(&buffer);
 
-    var crossing_pair_names = try binance.findPairsForTradeTracking(allocator);
+    var trading_symbols_strings = try binance.findSymbolsForTradeTracking(allocator);
     defer {
-        for (crossing_pair_names.items) |pair| {
+        for (trading_symbols_strings.items) |pair| {
             allocator.free(pair);
         }
-        crossing_pair_names.deinit(allocator);
+        trading_symbols_strings.deinit(allocator);
     }
-    const crossing_pairs = try storage.generatePairsFromStrings(allocator, crossing_pair_names.items);
-    for (crossing_pairs) |pair| {
-        std.log.info("Crossing pair: {s}", .{pair.name});
+    const trading_symbols = try storage.generateSymbolsFromStrings(allocator, trading_symbols_strings.items);
+    for (trading_symbols) |pair| {
+        std.debug.print("{s},", .{pair.name});
     }
-    defer allocator.free(crossing_pairs);
+    std.debug.print("\n", .{});
+    defer allocator.free(trading_symbols);
 
     var shutdown = std.atomic.Value(bool).init(false);
     // var signal_task = try runtime.spawn(signalHandler, .{ runtime, &shutdown }, .{ .stack_size = 64 * 1024 });
@@ -216,17 +247,23 @@ pub fn main() !void {
 
     var store = try AppEventStorage.init(allocator);
     defer store.deinit(allocator);
+
+    var runtime = try zio.Runtime.init(allocator, .{
+        .num_executors = 1,
+        .thread_pool = .{ .max_threads = 1 },
+    });
+    defer runtime.deinit();
     var storage_task = try runtime.spawn(storageRoutine, .{ runtime, &update_channel, &store }, .{});
     defer storage_task.cancel(runtime);
 
-    const partitioned_pairs = try array_tools.partitionArray(storage.Pair, crossing_pairs, 3, allocator);
+    const partitioned_pairs = try array_tools.partitionArray(storage.Pair, trading_symbols, 3, allocator);
     defer allocator.free(partitioned_pairs);
 
-    const TaskHandle = @TypeOf(try runtime.spawn(websocketStreamCollector, .{ runtime, &.{}, &update_channel, &shutdown }, .{}));
+    const TaskHandle = @TypeOf(try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, &.{}, &update_channel, &shutdown }, .{}));
     const tasks: []TaskHandle = try allocator.alloc(TaskHandle, partitioned_pairs.len);
     for (partitioned_pairs, 0..) |batch, index| {
         std.log.info("Starting WebSocket collector for {d} pairs", .{batch.len});
-        const task = try runtime.spawn(websocketStreamCollector, .{ runtime, batch, &update_channel, &shutdown }, .{});
+        const task = try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, batch, &update_channel, &shutdown }, .{});
         tasks[index] = task;
     }
     defer {
@@ -238,11 +275,10 @@ pub fn main() !void {
 
     var server_task = try runtime.spawn(
         server.runServer,
-        .{ runtime, &store, crossing_pairs },
+        .{ runtime, &store, trading_symbols },
         .{},
     );
     defer server_task.cancel(runtime);
-
     std.log.info("All WebSocket collectors started", .{});
     try runtime.run();
 }

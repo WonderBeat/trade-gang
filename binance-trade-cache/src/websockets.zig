@@ -34,7 +34,6 @@ pub const AsyncStream = struct {
         errdefer rt.allocator.free(buffer);
         const quarter = buffer.len / 4;
 
-        // Split buffer into TCP and TLS buffers
         const tcp_read_buffer = buffer[0..quarter];
         const tcp_write_buffer = buffer[quarter .. 2 * quarter];
         const tls_read_buffer = buffer[2 * quarter .. 3 * quarter];
@@ -45,17 +44,14 @@ pub const AsyncStream = struct {
             .stream = try zio.net.tcpConnectToHost(rt, config.host, config.port),
             .buffer = buffer,
             .tls_client = null,
-            .reader = undefined,
-            .writer = undefined,
+            .reader = stream_ref.stream.reader(rt, tcp_read_buffer),
+            .writer = stream_ref.stream.writer(rt, tcp_write_buffer),
         };
         errdefer {
             stream_ref.stream.close(rt);
             stream_ref.stream.shutdown(rt, .both) catch |err| std.log.err("Shutdown error: {}", .{err});
             rt.allocator.destroy(stream_ref);
         }
-
-        stream_ref.reader = stream_ref.stream.reader(rt, tcp_read_buffer);
-        stream_ref.writer = stream_ref.stream.writer(rt, tcp_write_buffer);
 
         if (config.tls) {
             std.log.debug("Initiating TLS handshake...", .{});
