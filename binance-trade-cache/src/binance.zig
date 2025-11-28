@@ -254,7 +254,7 @@ pub fn extractTimestampFromAggTrade(agg_trade_json: []const u8) !u64 {
 }
 
 // Extracts the symbol/pair name from aggregate trade message JSON
-pub fn extractSymbolFromAggTrade(agg_trade_json: []const u8) ![]const u8 {
+pub fn extractSymbol(agg_trade_json: []const u8) ![]const u8 {
     const symbol_start = std.mem.indexOf(u8, agg_trade_json, "\"s\":") orelse return error.SymbolNotFound;
     const after_colon = symbol_start + 4; // Skip past "\"s\":"
     const after_opening_quote = if (agg_trade_json[after_colon] == '"') after_colon + 1 else after_colon;
@@ -316,7 +316,7 @@ test "extractSymbolFromAggTrade extracts symbol correctly" {
 
     const expected_symbol = "BNBUSDT";
 
-    const extracted_symbol = try extractSymbolFromAggTrade(agg_trade_json);
+    const extracted_symbol = try extractSymbol(agg_trade_json);
     try std.testing.expect(std.mem.eql(u8, expected_symbol, extracted_symbol));
 }
 

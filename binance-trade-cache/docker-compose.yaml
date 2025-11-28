@@ -1,0 +1,13 @@
+services:
+  trade-cache:
+    security_opt:
+      - seccomp:unconfined
+    image: harbor.gladiators.dev/library/trade-cache:latest
+    network_mode: "host"
+    restart: on-failure
+    container_name: binance-trade-cache
+    mem_limit: 100m
+    environment:
+      - RCV_TIMEOUT=500 # message receive timeout in milliseconds
+    # ports:
+    #   - "8081:8081/udp"

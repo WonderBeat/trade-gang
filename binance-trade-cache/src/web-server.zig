@@ -34,13 +34,12 @@ fn handleClient(rt: *zio.Runtime, stream: zio.net.Stream, ctx: *AppContext) !voi
         std.log.debug("Failed to receive request: {}", .{err});
         return err;
     };
-    const pair_name = extractPairName(request.head.target) catch {
-        try request.respond("No such stream", .{
-            .status = .not_found,
-            .extra_headers = &.{
-                .{ .name = "content-type", .value = "text/html; charset=utf-8" },
-            },
-        });
+    const pair_name = extractPairName(request.head.target) orelse {
+        var body_writer = try request.respondStreaming(&read_buffer, .{});
+        for (ctx.streams) |pair| {
+            try writeBody(&body_writer.writer, ctx, pair.name);
+        }
+        try body_writer.end();
         return;
     };
 
@@ -51,22 +50,24 @@ fn handleClient(rt: *zio.Runtime, stream: zio.net.Stream, ctx: *AppContext) !voi
     try body_writer.end();
 }
 
-fn extractPairName(target: []const u8) ![]const u8 {
+fn extractPairName(target: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, target, "/stream/")) {
-        return error.InvalidPath;
+        return null;
     }
     var path_parts = std.mem.splitSequence(u8, target, "/");
     _ = path_parts.next(); // Skip empty string
     _ = path_parts.next(); // Skip "stream"
-    const pair_name = path_parts.next() orelse return error.MissingPairName;
+    const pair_name = path_parts.next() orelse return null;
     return pair_name;
 }
 
 pub fn runServer(rt: *zio.Runtime, store: *main.AppEventStorage, streams: []const storage.Pair) !void {
     var ctx = AppContext{ .rt = rt, .store = store, .streams = streams };
     const env = std.posix.getenv("PORT") orelse "8281";
+    const host = std.posix.getenv("HOST") orelse "127.0.0.1";
     const port: u16 = try std.fmt.parseInt(u16, env, 0);
-    const addr = try zio.net.IpAddress.parseIp4("127.0.0.1", port);
+    const addr = try zio.net.IpAddress.parseIp4(host, port);
+    std.log.info("Listening on {s}:{d}", .{ host, port });
     const server = try addr.listen(rt, .{});
     defer server.close(rt);
     while (true) {
@@ -83,14 +84,14 @@ fn writeBody(writer: *std.Io.Writer, ctx: *AppContext, stream: []const u8) !void
             var events = try ctx.store.getEventsForBucket(ctx.rt.allocator, pair.id);
             if (events) |*existing_events| {
                 defer existing_events.deinit(ctx.rt.allocator);
-                _ = try writer.write("[");
+                _ = try writer.write("[\n");
                 for (existing_events.items, 0..) |element, index| {
                     _ = try writer.write(element);
                     if (index < existing_events.items.len - 1) {
                         _ = try writer.write(",");
                     }
                 }
-                _ = try writer.write("]");
+                _ = try writer.write("\n]");
             } else {
                 _ = try writer.write("No events for this stream");
             }

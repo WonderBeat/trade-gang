@@ -27,21 +27,17 @@ pub fn generateSymbolsFromStrings(allocator: std.mem.Allocator, strings: []const
     return pairs;
 }
 
-pub fn RingBuffer(comptime internal_size: usize) type {
+pub fn RingBuffer(comptime internal_size: usize, comptime T: anytype) type {
     return struct {
-        elements: [internal_size][]const u8,
-        head: usize,
-        count: usize,
+        elements: [internal_size]T = undefined,
+        head: usize = 0,
+        count: usize = 0,
 
         pub fn init() @This() {
-            return @This(){
-                .elements = [_][]const u8{""} ** internal_size,
-                .head = 0,
-                .count = 0,
-            };
+            return @This(){};
         }
 
-        pub fn push(self: *@This(), event: []const u8) void {
+        pub fn push(self: *@This(), event: T) void {
             self.elements[self.head] = event;
             self.head = (self.head + 1) % internal_size;
 
@@ -50,17 +46,11 @@ pub fn RingBuffer(comptime internal_size: usize) type {
             }
         }
 
-        pub fn getEvents(self: *const @This(), allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
-            var result = std.ArrayList([]const u8){};
-            try result.ensureTotalCapacity(allocator, self.count);
+        pub fn getEvents(self: *const @This(), allocator: std.mem.Allocator) !std.ArrayList(T) {
+            var result = try std.ArrayList([]const u8).initCapacity(allocator, internal_size);
+            const start_idx = if (self.count == internal_size) self.head else 0;
 
-            const start_idx = if (self.count == internal_size)
-                self.head // If buffer is full, oldest element is at head
-            else
-                (self.head + internal_size - self.count) % internal_size;
-
-            var i: usize = 0;
-            while (i < self.count) : (i += 1) {
+            for (0..self.count) |i| {
                 const idx = (start_idx + i) % internal_size;
                 try result.append(allocator, self.elements[idx]);
             }
@@ -76,18 +66,17 @@ pub fn RingBuffer(comptime internal_size: usize) type {
 
 pub fn RecentEventsStringStorage(comptime events_per_bucket: usize, comptime num_buckets: usize, comptime max_record_len: usize) type {
     return struct {
-        buffers: [num_buckets]RingBuffer(events_per_bucket),
+        buffers: [num_buckets]RingBuffer(events_per_bucket, []const u8) = undefined,
         tape_buffer: []u8 = undefined,
-        tape: StringTape = undefined,
+        tapes: [num_buckets]StringTape = undefined,
 
         pub fn init(allocator: std.mem.Allocator) !@This() {
-            var obj = @This(){
-                .buffers = undefined, //[_]RingBuffer(events_per_bucket){RingBuffer(events_per_bucket).init()} ** num_buckets,
-                .tape_buffer = undefined,
-                .tape = undefined,
-            };
-            obj.tape_buffer = try allocator.alloc(u8, num_buckets * events_per_bucket * max_record_len);
-            obj.tape = StringTape.init(obj.tape_buffer);
+            var obj = @This(){};
+            const tape_size = events_per_bucket * max_record_len;
+            obj.tape_buffer = try allocator.alloc(u8, num_buckets * tape_size);
+            for (&obj.tapes, 0..) |*tape, index| {
+                tape.* = StringTape.init(obj.tape_buffer[index * tape_size .. (index + 1) * tape_size]);
+            }
             return obj;
         }
 
@@ -97,12 +86,11 @@ pub fn RecentEventsStringStorage(comptime events_per_bucket: usize, comptime num
 
         pub fn processEvent(self: *@This(), bucket: usize, event: []const u8) !void {
             std.debug.assert(event.len < max_record_len);
-            const stored_event = try self.tape.write(event);
-            if (bucket < num_buckets) {
-                self.buffers[bucket].push(stored_event);
-            } else {
+            if (bucket > num_buckets) {
                 return error.BucketOutOfRange;
             }
+            const stored_event = try self.tapes[bucket].write(event);
+            self.buffers[bucket].push(stored_event);
         }
 
         pub fn getEventsForBucket(self: *@This(), allocator: std.mem.Allocator, bucket: usize) !?std.ArrayList([]const u8) {
@@ -122,7 +110,7 @@ pub fn RecentEventsStringStorage(comptime events_per_bucket: usize, comptime num
 }
 
 test "RingBuffer basic functionality" {
-    var buffer = RingBuffer(10).init();
+    var buffer = RingBuffer(10, []const u8).init();
 
     try std.testing.expectEqual(@as(usize, 0), buffer.len());
 
@@ -142,7 +130,7 @@ test "RingBuffer basic functionality" {
 }
 
 test "RingBuffer overflow behavior" {
-    var buffer = RingBuffer(3).init(); // Small capacity for testing
+    var buffer = RingBuffer(3, []const u8).init(); // Small capacity for testing
 
     buffer.push("event1");
     buffer.push("event2");

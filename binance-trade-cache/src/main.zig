@@ -18,8 +18,8 @@ const PORT = 443;
 const EVENTS_PER_BUCKET = 100;
 const NUM_BUCKETS = 400;
 const MAX_RECORD_LENGTH = 200;
-const WS_RECV_TIMEOUT = 3000;
-const STREAM_UPDATE_BUFFER_SIZE: usize = 100;
+const WS_RECV_TIMEOUT = 2000;
+const STREAM_UPDATE_BUFFER_SIZE: usize = 300;
 
 //
 // const uri = "ws.postman-echo.com";
@@ -76,8 +76,8 @@ fn storageRoutine(
         };
         if (builtin.mode == .Debug) {
             updates_count += 1;
-            if (updates_count % 500 == 0) {
-                std.log.debug("Updates processed: {}", .{updates_count});
+            if (updates_count % 47700 == 0) {
+                std.log.debug("Storage Updates processed: {}", .{updates_count});
             }
         }
     }
@@ -88,9 +88,19 @@ fn retryingWebsocketStreamCollector(
     pairs: []const storage.Pair,
     update_channel: *zio.Channel(storage.StreamUpdate),
     shutdown: *std.atomic.Value(bool),
+    worker_index: usize,
 ) !void {
+    const tape_buffer = try rt.allocator.alloc(u8, STREAM_UPDATE_BUFFER_SIZE * MAX_RECORD_LENGTH);
+    defer rt.allocator.free(tape_buffer);
     while (true) {
-        websocketStreamCollector(rt, pairs, update_channel, shutdown) catch |err| {
+        websocketStreamCollector(
+            rt,
+            pairs,
+            update_channel,
+            shutdown,
+            worker_index,
+            tape_buffer,
+        ) catch |err| {
             if (err == zio.Cancelable.Canceled) {
                 std.log.info("Task cancelled", .{});
             } else {
@@ -98,7 +108,7 @@ fn retryingWebsocketStreamCollector(
                 return err;
             }
         };
-        std.log.warn("Collector stopped. Restarting...", .{});
+        std.log.warn("Collector {d} stopped. Restarting...", .{worker_index});
         try rt.sleep(2000);
     }
 }
@@ -108,6 +118,8 @@ fn websocketStreamCollector(
     pairs: []const storage.Pair,
     update_channel: *zio.Channel(storage.StreamUpdate),
     shutdown: *std.atomic.Value(bool),
+    worker_index: usize,
+    tape_buffer: []u8,
 ) !void {
     var pair_map = std.StringHashMap(storage.Pair).init(rt.allocator);
     defer pair_map.deinit();
@@ -131,19 +143,23 @@ fn websocketStreamCollector(
         client.close(.{ .code = 4002 }) catch unreachable;
         client.deinit();
     }
-    std.log.info("WebSocket client initialized. Connecting to {s}:{d}...", .{ URI, PORT });
     try client.handshake(stream_path, .{
-        .timeout_ms = 10000,
+        .timeout_ms = 5000,
         .headers = std.fmt.comptimePrint("Host: {s}\r\nOrigin: {s}", .{ URI, URI }),
     });
 
-    try client.readTimeout(WS_RECV_TIMEOUT);
+    if (std.posix.getenv("RCV_TIMEOUT")) |timeout| {
+        const timeout_ms = try std.fmt.parseInt(u32, timeout, 10);
+        std.log.info("Using custom net timeout {d}", .{timeout_ms});
+        try client.readTimeout(timeout_ms);
+    } else {
+        try client.readTimeout(WS_RECV_TIMEOUT);
+    }
+    std.log.info("WebSocket client initialized {d}. Connecting to {s}:{d}...", .{ worker_index, URI, PORT });
     try client.writeTimeout(100);
     var msg = try client.read();
     var last_ping = std.time.milliTimestamp();
-    const tape_buffer = try rt.allocator.alloc(u8, STREAM_UPDATE_BUFFER_SIZE * MAX_RECORD_LENGTH);
-    defer rt.allocator.free(tape_buffer);
-    var tape_ring_buf = tape.StringTape.init(tape_buffer);
+    var string_tape = tape.StringTape.init(tape_buffer);
     var updates_count: usize = 0;
     while (msg) |message| {
         {
@@ -154,37 +170,26 @@ fn websocketStreamCollector(
             }
             switch (message.type) {
                 .text => {
-                    // std.log.info("Received update: {s}", .{message.data});
-                    //std.debug.assert(std.mem.containsAtLeast(u8, message.data, 1, AGG_TRADE));
-                    const pair_name = try binance.extractSymbolFromAggTrade(message.data);
-                    const found_pair = pair_map.get(pair_name);
-                    if (found_pair) |pair| {
-                        const timestamp = try binance.extractTimestampFromAggTrade(message.data);
-                        const data_section = try binance.extractDataSectionFromJson(message.data);
+                    const data_section = try binance.extractDataSectionFromJson(message.data);
+                    std.debug.assert(std.mem.startsWith(u8, data_section, "{\"e\":\"trade\""));
 
-                        const update = storage.StreamUpdate{
-                            .timestamp = timestamp,
-                            .pair = pair,
-                            .data = try tape_ring_buf.write(data_section),
-                        };
-                        try update_channel.send(rt, update);
-                        updates_count += 1;
-                        if (builtin.mode == .Debug) {
-                            if (updates_count % 1000 == 0) {
-                                std.log.info("WS consumed {d} updates, exiting", .{updates_count});
-                                try rt.sleep(500); // so consumer can process events queue
-                                return;
-                            }
-                        }
-                    } else {
-                        std.log.debug("Received update for pair {s} which is not in our tracking list", .{pair_name});
-                    }
+                    const symbol = try binance.extractSymbol(data_section);
+                    const pair = pair_map.get(symbol) orelse return error.SymbolNotFound;
+                    const timestamp = try binance.extractTimestampFromAggTrade(data_section);
+
+                    const update = storage.StreamUpdate{
+                        .timestamp = timestamp,
+                        .pair = pair,
+                        .data = try string_tape.write(data_section),
+                    };
+                    try update_channel.send(rt, update);
+                    updates_count += 1;
                 },
                 .ping => {
                     std.log.debug("Received ping message", .{});
                     const now = std.time.milliTimestamp();
                     if (last_ping + 30 * std.time.ms_per_s < now) {
-                        std.log.info("Updates processed {d}", .{updates_count});
+                        std.log.info("{d} Updates processed {d}", .{ worker_index, updates_count });
                         std.log.debug("Sending PONG", .{});
                         try client.writePong(message.data);
                         last_ping = now;
@@ -192,10 +197,12 @@ fn websocketStreamCollector(
                 },
                 .pong => std.log.info("Received pong message", .{}),
                 .close => {
-                    std.log.err("Received close message. Last ping was at {d}", .{last_ping});
+                    const now = std.time.milliTimestamp();
+                    const latency = now - last_ping;
+                    std.log.err("{d} Received close message. Last ping was at {d}, {d} seconds ago", .{ worker_index, last_ping, @divFloor(latency, 1000) });
                     return;
                 },
-                else => std.log.err("Received unsupported message type {} [{s}]", .{ message, message.data }),
+                else => std.log.err("{d} Received unsupported message type {} [{s}]", .{ worker_index, message, message.data }),
             }
         }
         msg = try client.read();
@@ -215,9 +222,7 @@ pub fn main() !void {
     const allocator, const is_debug = gpa: {
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            //.ReleaseFast, .ReleaseSmall => .{ @constCast(&std.heap.stackFallback(4096 * 3, std.heap.c_allocator)).get(), false },
             .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
-            //.ReleaseFast, .ReleaseSmall => .{ debug_allocator.allocator(), false },
         };
     };
     if (!is_debug) {
@@ -246,6 +251,7 @@ pub fn main() !void {
     // defer signal_task.cancel(runtime);
 
     var store = try AppEventStorage.init(allocator);
+    std.debug.assert(NUM_BUCKETS > trading_symbols.len);
     defer store.deinit(allocator);
 
     var runtime = try zio.Runtime.init(allocator, .{
@@ -256,14 +262,15 @@ pub fn main() !void {
     var storage_task = try runtime.spawn(storageRoutine, .{ runtime, &update_channel, &store }, .{});
     defer storage_task.cancel(runtime);
 
-    const partitioned_pairs = try array_tools.partitionArray(storage.Pair, trading_symbols, 3, allocator);
-    defer allocator.free(partitioned_pairs);
+    const partitions_count = try std.fmt.parseInt(u32, std.posix.getenv("SOCKETS_COUNT") orelse "3", 0);
+    const partitioned_symbols = try array_tools.partitionArray(storage.Pair, trading_symbols, partitions_count, allocator);
+    defer allocator.free(partitioned_symbols);
 
-    const TaskHandle = @TypeOf(try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, &.{}, &update_channel, &shutdown }, .{}));
-    const tasks: []TaskHandle = try allocator.alloc(TaskHandle, partitioned_pairs.len);
-    for (partitioned_pairs, 0..) |batch, index| {
-        std.log.info("Starting WebSocket collector for {d} pairs", .{batch.len});
-        const task = try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, batch, &update_channel, &shutdown }, .{});
+    const TaskHandle = @TypeOf(try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, &.{}, &update_channel, &shutdown, 0 }, .{}));
+    const tasks: []TaskHandle = try allocator.alloc(TaskHandle, partitioned_symbols.len);
+    for (partitioned_symbols, 0..) |batch, index| {
+        std.log.info("Starting {d} WebSocket collector for {d} pairs", .{ index, batch.len });
+        const task = try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, batch, &update_channel, &shutdown, index }, .{});
         tasks[index] = task;
     }
     defer {
@@ -279,7 +286,7 @@ pub fn main() !void {
         .{},
     );
     defer server_task.cancel(runtime);
-    std.log.info("All WebSocket collectors started", .{});
+    std.log.info("Activating runtime", .{});
     try runtime.run();
 }
 

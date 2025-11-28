@@ -73,7 +73,6 @@
             .url = "git+https://github.com/lalinsky/zio#96016e3d6419f282ed703c8169d090c870b97543",
             .hash = "zio-0.4.0-xHbVVLbuDwC63G9ikAnhQD55D76Y-oXhZmCqAqQjgb-r",
         },
-        .websocket = .{ .path = "../../websocket.zig" },
         // .tardy = .{
         //     .url = "git+https://github.com/tardy-org/tardy?ref=v0.3.0#cd454060f3b6006368d53c05ab96cd16c73c34de",
         //     .hash = "tardy-0.3.0-69wrgi7PAwDFhO7m0aXae6N15s2b28VIOrnRrSHHake6",
@@ -87,6 +86,10 @@
         //     .url = "git+https://github.com/lalinsky/dusty#9eeae8c8ee5fa9acc4377389c5d95ed960d65fd0",
         //     .hash = "dusty-0.0.0-Qdw7RtxoBwASpcjn0hJqV_4Jm8e0pijeW6mmp3d3FZTK",
         // },
+        .websocket = .{
+            .url = "git+https://github.com/WonderBeat/websocket.zig#230c8bb48de62e8ac976674b2077682e2ac60a63",
+            .hash = "websocket-0.1.0-ZPISdfF7AwBBkXY-poqFUvcxoOECk4mXPHqclQwqOCD4",
+        },
     },
     // Specifies the set of files and directories that are included in this package.
     // Only files and directories listed here are included in the `hash` that

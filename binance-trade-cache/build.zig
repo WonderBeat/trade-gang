@@ -19,6 +19,12 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     options.addOption(bool, "verbose", verbose);
 
+    const backend = b.option(
+        []const u8,
+        "backend",
+        "Override the default aio backend (io_uring, epoll, kqueue, iocp, wasi_poll)",
+    );
+
     const root_module = b.addModule("root", .{
         .root_source_file = b.path("src/main.zig"),
         .optimize = optimize,
@@ -33,7 +39,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addOptions("config", options);
     exe.addIncludePath(b.path("."));
 
-    const zio = b.dependency("zio", .{ .target = target, .optimize = optimize });
+    const zio = b.dependency("zio", .{ .target = target, .optimize = optimize, .backend = backend });
     const simdjzon = b.dependency("simdjzon", .{ .target = target, .optimize = optimize });
     exe.root_module.addImport("zio", zio.module("zio"));
     exe.root_module.addImport("simdjzon", simdjzon.module("simdjzon"));

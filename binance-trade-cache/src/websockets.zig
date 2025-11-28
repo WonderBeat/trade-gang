@@ -81,15 +81,23 @@ pub const AsyncStream = struct {
         self.rt.allocator.destroy(self.stream_ref);
     }
 
-    const ReadError = error{
-        ConnectionResetByPeer,
-        BrokenPipe,
-        NotOpenForReading,
+    //aio copy
+    pub const RecvError = error{
         WouldBlock,
-        ReadFailed,
-        WriteFailed,
-        EndOfStream,
+        ConnectionRefused,
+        ConnectionResetByPeer,
+        ConnectionAborted,
+        ConnectionTimedOut,
+        SocketNotConnected,
+        FileDescriptorNotASocket,
+        SocketShutdown,
+        OperationNotSupported,
+        NetworkDown,
+        SystemResources,
+        Canceled,
+        Unexpected,
     };
+    const WsReadError = std.crypto.tls.Client.ReadError || RecvError || zio.Cancelable || std.io.Reader.StreamError || error{ BrokenPipe, NotOpenForReading };
 
     inline fn streamReader(self: *AsyncStream) *std.Io.Reader {
         if (self.stream_ref.tls_client != null) {
@@ -105,7 +113,7 @@ pub const AsyncStream = struct {
         return &self.stream_ref.writer.interface;
     }
 
-    pub fn read(self: *AsyncStream, buf: []u8) ReadError!usize {
+    pub fn read(self: *AsyncStream, buf: []u8) WsReadError!usize {
         var w: std.Io.Writer = .fixed(buf);
         const reader = self.streamReader();
         var timeout = zio.Timeout.init;
@@ -116,11 +124,12 @@ pub const AsyncStream = struct {
                 if (self.stream_ref.tls_client) |tls| {
                     if (tls.read_err) |read_err| {
                         std.debug.print("TLS read error: {}\n", .{read_err});
-                        return err;
+                        return read_err;
                     }
                 }
                 if (self.stream_ref.reader.err) |stream_err| {
                     std.debug.print("Stream read error: {}\n", .{stream_err});
+                    return stream_err;
                 }
                 return err;
             };
