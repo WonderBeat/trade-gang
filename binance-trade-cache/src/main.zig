@@ -76,7 +76,11 @@ fn storageRoutine(
         };
         if (builtin.mode == .Debug) {
             updates_count += 1;
+            metrics.processed();
             if (updates_count % 47700 == 0) {
+                const now = std.time.milliTimestamp();
+                const latency = now - update.timestamp;
+                metrics.latency(latency);
                 std.log.debug("Storage Updates processed: {}", .{updates_count});
             }
         }
@@ -109,6 +113,7 @@ fn retryingWebsocketStreamCollector(
             }
         };
         std.log.warn("Collector {d} stopped. Restarting...", .{worker_index});
+        metrics.restarts();
         try rt.sleep(2000);
     }
 }

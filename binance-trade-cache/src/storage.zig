@@ -9,7 +9,7 @@ pub const Pair = struct {
 };
 
 pub const StreamUpdate = struct {
-    timestamp: u64,
+    timestamp: i64,
     data: []const u8,
     pair: Pair,
 };

@@ -34,12 +34,16 @@ fn handleClient(rt: *zio.Runtime, stream: zio.net.Stream, ctx: *AppContext) !voi
         std.log.debug("Failed to receive request: {}", .{err});
         return err;
     };
-    const pair_name = extractPairName(request.head.target) orelse {
+    if (!std.mem.startsWith(u8, request.head.target, "/all/")) {
         var body_writer = try request.respondStreaming(&read_buffer, .{});
         for (ctx.streams) |pair| {
             try writeBody(&body_writer.writer, ctx, pair.name);
         }
         try body_writer.end();
+        return;
+    }
+    const pair_name = extractPairName(request.head.target) orelse {
+        try request.respond("ERR", .{ .status = .not_found });
         return;
     };
 

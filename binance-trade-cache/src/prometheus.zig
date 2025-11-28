@@ -5,54 +5,28 @@ const m = @import("metrics");
 var metrics = m.initializeNoop(Metrics);
 
 const Metrics = struct {
-    hits: m.Counter(u32),
-    errors: m.Counter(u32),
-    latest: m.Gauge(u32),
-    latency: Latency,
-    timeout: m.Counter(u32),
-    sslError: m.Counter(u32),
-    rateLimitErrors: m.Counter(u32),
-
-    const Latency = m.Histogram(u16, &.{ 100, 200, 400, 600, 800, 1000, 1500, 3000 });
+    processed: m.Counter(u32),
+    restarts: m.Counter(u32),
+    latency: m.Gauge(i64),
 };
 
-pub fn hit() void {
-    metrics.hits.incr();
+pub fn processed() void {
+    metrics.processed.incr();
 }
 
-pub fn timeout() void {
-    metrics.timeout.incr();
+pub fn restarts() void {
+    metrics.restarts.incr();
 }
 
-pub fn sslError() void {
-    metrics.sslError.incr();
-}
-
-pub fn err() void {
-    metrics.errors.incr();
-}
-
-pub fn latest(value: u32) void {
-    metrics.latest.set(value);
-}
-
-pub fn latency(value: u16) void {
-    metrics.latency.observe(value);
-}
-
-pub fn rateLimited() void {
-    metrics.rateLimitErrors.incr();
+pub fn latency(value: i64) void {
+    metrics.latency.set(value);
 }
 
 pub fn initializeMetrics(comptime opts: m.RegistryOpts) !void {
     metrics = .{
-        .hits = m.Counter(u32).init("hits", .{}, opts),
-        .errors = m.Counter(u32).init("errors", .{}, opts),
-        .timeout = m.Counter(u32).init("timeout", .{}, opts),
-        .sslError = m.Counter(u32).init("ssl_err", .{}, opts),
-        .latest = m.Gauge(u32).init("latest", .{}, opts),
-        .latency = Metrics.Latency.init("latency", .{}, opts),
-        .rateLimitErrors = m.Counter(u32).init("rate_limit_errors", .{}, opts),
+        .processed = m.Counter(u32).init("processed", .{}, opts),
+        .restarts = m.Counter(u32).init("restarts", .{}, opts),
+        .latency = m.Gauge(i64).init("latency", .{}, opts),
     };
 }
 

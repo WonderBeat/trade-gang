@@ -240,7 +240,7 @@ pub fn intersectPairs(
 }
 
 // Extracts the timestamp from aggregate trade message JSON using string tools, dividing by 1000 to convert from milliseconds to seconds
-pub fn extractTimestampFromAggTrade(agg_trade_json: []const u8) !u64 {
+pub fn extractTimestampFromAggTrade(agg_trade_json: []const u8) !i64 {
     const event_time_start = std.mem.indexOf(u8, agg_trade_json, "\"E\":") orelse return error.TimestampNotFound;
     const after_colon = event_time_start + 4; // Skip past "\"E\":"
     var pos = after_colon;
@@ -249,8 +249,8 @@ pub fn extractTimestampFromAggTrade(agg_trade_json: []const u8) !u64 {
         agg_trade_json[pos] <= '9') : (pos += 1)
     {}
     const timestamp_str = agg_trade_json[after_colon..pos];
-    const event_time = try std.fmt.parseInt(u64, timestamp_str, 10);
-    return event_time / 1000;
+    const event_time = try std.fmt.parseInt(i64, timestamp_str, 10);
+    return @divTrunc(event_time, 1000);
 }
 
 // Extracts the symbol/pair name from aggregate trade message JSON
