@@ -8,6 +8,7 @@ const Metrics = struct {
     processed: m.Counter(u32),
     restarts: m.Counter(u32),
     latency: m.Gauge(i64),
+    max_ts: m.Gauge(i64),
 };
 
 pub fn processed() void {
@@ -22,11 +23,16 @@ pub fn latency(value: i64) void {
     metrics.latency.set(value);
 }
 
+pub fn maxTs(value: i64) void {
+    metrics.max_ts.set(value);
+}
+
 pub fn initializeMetrics(comptime opts: m.RegistryOpts) !void {
     metrics = .{
         .processed = m.Counter(u32).init("processed", .{}, opts),
         .restarts = m.Counter(u32).init("restarts", .{}, opts),
         .latency = m.Gauge(i64).init("latency", .{}, opts),
+        .max_ts = m.Gauge(i64).init("max_ts", .{}, opts),
     };
 }
 
@@ -41,4 +47,8 @@ pub fn dumpToFile() !void {
     var buffer: [500]u8 = undefined;
     var writer = file.writer(&buffer).interface;
     try writeMetrics(&writer);
+}
+
+pub fn dump(writer: *std.Io.Writer) !void {
+    try writeMetrics(writer);
 }

@@ -19,7 +19,7 @@ const EVENTS_PER_BUCKET = 100;
 const NUM_BUCKETS = 400;
 const MAX_RECORD_LENGTH = 200;
 const WS_RECV_TIMEOUT = 2000;
-const STREAM_UPDATE_BUFFER_SIZE: usize = 300;
+const STREAM_UPDATE_BUFFER_SIZE: usize = 200;
 
 //
 // const uri = "ws.postman-echo.com";
@@ -63,6 +63,7 @@ fn storageRoutine(
     var timeout = zio.Timeout.init;
     std.log.debug("Storage routine started", .{});
     var updates_count: usize = 0;
+    var max_seen_ts: i64 = 0;
     while (true) {
         timeout.set(rt, 10 * std.time.ns_per_s);
         const update = update_channel.receive(rt) catch |err| {
@@ -74,15 +75,16 @@ fn storageRoutine(
             std.log.err("Store event error {}", .{err});
             return err;
         };
-        if (builtin.mode == .Debug) {
-            updates_count += 1;
-            metrics.processed();
-            if (updates_count % 47700 == 0) {
-                const now = std.time.milliTimestamp();
-                const latency = now - update.timestamp;
-                metrics.latency(latency);
-                std.log.debug("Storage Updates processed: {}", .{updates_count});
-            }
+        updates_count += 1;
+        max_seen_ts = @max(update.timestamp, max_seen_ts);
+        metrics.processed();
+        if (updates_count % 67700 == 0) {
+            const now = std.time.milliTimestamp();
+            const latency = now - max_seen_ts;
+            metrics.latency(latency);
+            metrics.lastSeenTs(max_seen_ts);
+            //try metrics.dumpToFile();
+            std.log.info("Storage Updates processed: {}", .{updates_count});
         }
     }
 }

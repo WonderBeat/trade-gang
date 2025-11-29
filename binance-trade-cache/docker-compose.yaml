@@ -8,6 +8,12 @@ services:
     container_name: binance-trade-cache
     mem_limit: 50m
     cpus: "1"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        { touch metrics.prometheus && /nc-web.sh; } &
+        /app
     environment:
       - RCV_TIMEOUT=500 # message receive timeout in milliseconds
     # ports:

@@ -4,6 +4,7 @@ const http = @import("dusty");
 const main = @import("main.zig");
 const storage = @import("storage.zig");
 const binance = @import("binance.zig");
+const metrics = @import("prometheus.zig");
 
 const AppContext = struct {
     rt: *zio.Runtime,
@@ -34,7 +35,13 @@ fn handleClient(rt: *zio.Runtime, stream: zio.net.Stream, ctx: *AppContext) !voi
         std.log.debug("Failed to receive request: {}", .{err});
         return err;
     };
-    if (!std.mem.startsWith(u8, request.head.target, "/all/")) {
+    if (std.mem.startsWith(u8, request.head.target, "/metrics")) {
+        var body_writer = try request.respondStreaming(&read_buffer, .{});
+        try metrics.dump(&body_writer.writer);
+        try body_writer.end();
+        return;
+    }
+    if (std.mem.startsWith(u8, request.head.target, "/all")) {
         var body_writer = try request.respondStreaming(&read_buffer, .{});
         for (ctx.streams) |pair| {
             try writeBody(&body_writer.writer, ctx, pair.name);
