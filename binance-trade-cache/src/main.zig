@@ -12,7 +12,7 @@ const storage = @import("storage.zig");
 const server = @import("web-server.zig");
 const bind = @import("fn-binding.zig");
 
-const URI = "fstream.binance.com";
+const FSTREAM_URI = "fstream.binance.com";
 const IS_TLS = true;
 const PORT = 443;
 const EVENTS_PER_BUCKET = 100;
@@ -39,6 +39,35 @@ pub const std_options = std.Options{
 const AGG_TRADE =
     \\"e":"aggTrade"
 ;
+
+pub fn ReturnType(func: anytype) type {
+    return if (@typeInfo(@TypeOf(func)).@"fn".return_type) |ret| ret else void;
+}
+
+fn watchdog(
+    // rt cant spawn anytype func thats why we do a bit of a dance here
+    comptime T: type,
+) type {
+    return struct {
+        fn guard(
+            rt: *zio.Runtime,
+            awaitable: *T,
+            err_text: ?[]const u8,
+        ) !zio.JoinHandle(ReturnType(awaitAndExit)) {
+            return try rt.spawn(awaitAndExit, .{ rt, awaitable, err_text }, .{});
+        }
+
+        fn awaitAndExit(rt: *zio.Runtime, awaitable: *T, err_text: ?[]const u8) !void {
+            _ = awaitable.join(rt) catch |err| {
+                std.log.err("Watchdog function err: {}", .{err});
+            }; // ignore errors
+            if (err_text) |text| {
+                std.log.err("{s}", .{text});
+            }
+            std.os.linux.exit(1);
+        }
+    };
+}
 
 fn signalHandler(rt: *zio.Runtime, shutdown: *std.atomic.Value(bool)) !void {
     // Create signal handler for SIGINT (Ctrl+C)
@@ -82,7 +111,7 @@ fn storageRoutine(
             const now = std.time.milliTimestamp();
             const latency = now - max_seen_ts;
             metrics.latency(latency);
-            metrics.lastSeenTs(max_seen_ts);
+            metrics.maxTs(max_seen_ts);
             //try metrics.dumpToFile();
             std.log.info("Storage Updates processed: {}", .{updates_count});
         }
@@ -134,15 +163,19 @@ fn websocketStreamCollector(
     for (pairs) |pair| {
         try pair_map.put(pair.name, pair);
     }
+    const stream_type = std.posix.getenv("STREAM_TYPE") orelse "@trade";
+    const stream_prefix = std.posix.getenv("STREAM_PREFIX") orelse "/stream?streams=";
+    const stream_uri = std.posix.getenv("STREAM_URI") orelse FSTREAM_URI;
 
     const stream_path = try binance.buildCombinedStreamUrlParams(rt.allocator, pairs, .{
-        .stream_type = "@trade",
+        .stream_type = stream_type,
+        .prefix = stream_prefix,
     });
     defer rt.allocator.free(stream_path);
 
     var client = try websockets.asyncClient(rt, .{
         .port = PORT,
-        .host = URI,
+        .host = stream_uri,
         .tls = IS_TLS,
         .buffer_size = 9000,
     });
@@ -152,7 +185,7 @@ fn websocketStreamCollector(
     }
     try client.handshake(stream_path, .{
         .timeout_ms = 5000,
-        .headers = std.fmt.comptimePrint("Host: {s}\r\nOrigin: {s}", .{ URI, URI }),
+        .headers = std.fmt.comptimePrint("Host: {s}\r\nOrigin: {s}", .{ FSTREAM_URI, FSTREAM_URI }),
     });
 
     if (std.posix.getenv("RCV_TIMEOUT")) |timeout| {
@@ -162,7 +195,7 @@ fn websocketStreamCollector(
     } else {
         try client.readTimeout(WS_RECV_TIMEOUT);
     }
-    std.log.info("WebSocket client initialized {d}. Connecting to {s}:{d}...", .{ worker_index, URI, PORT });
+    std.log.info("WebSocket client initialized {d}. Connecting to {s}:{d}...", .{ worker_index, stream_uri, PORT });
     try client.writeTimeout(100);
     var msg = try client.read();
     var last_ping = std.time.milliTimestamp();
@@ -277,7 +310,8 @@ pub fn main() !void {
     const tasks: []TaskHandle = try allocator.alloc(TaskHandle, partitioned_symbols.len);
     for (partitioned_symbols, 0..) |batch, index| {
         std.log.info("Starting {d} WebSocket collector for {d} pairs", .{ index, batch.len });
-        const task = try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, batch, &update_channel, &shutdown, index }, .{});
+        var task = try runtime.spawn(retryingWebsocketStreamCollector, .{ runtime, batch, &update_channel, &shutdown, index }, .{});
+        _ = try watchdog(@TypeOf(task)).guard(runtime, &task, "WebSocket collector task failed");
         tasks[index] = task;
     }
     defer {
@@ -287,11 +321,14 @@ pub fn main() !void {
         allocator.free(tasks);
     }
 
+    _ = try watchdog(@TypeOf(storage_task)).guard(runtime, &storage_task, "Storage task failed");
+
     var server_task = try runtime.spawn(
         server.runServer,
         .{ runtime, &store, trading_symbols },
         .{},
     );
+    _ = try watchdog(@TypeOf(server_task)).guard(runtime, &server_task, "Server task failed");
     defer server_task.cancel(runtime);
     std.log.info("Activating runtime", .{});
     try runtime.run();

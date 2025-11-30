@@ -101,12 +101,6 @@ pub fn httpGetBody(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
         return error.UnexpectedStatus;
     }
     return try writer.toOwnedSlice();
-    // var jsonReader = std.json.Reader.init(allocator, body);
-    // defer jsonReader.deinit();
-
-    // std.json.parseFromSlice(comptime T: type, allocator: Allocator, s: []const u8, options: ParseOptions)
-    // const parsed: std.json.Parsed(std.json.Value) = try std.json.parseFromTokenSource(std.json.Value, allocator, &jsonReader, .{});
-    // return parsed;
 }
 
 pub fn findSymbolsForTradeTracking(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {

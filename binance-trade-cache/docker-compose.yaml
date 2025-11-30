@@ -16,5 +16,6 @@ services:
         /app
     environment:
       - RCV_TIMEOUT=500 # message receive timeout in milliseconds
+      - STREAM_URL="stream.binance.com"
     # ports:
     #   - "8081:8081/udp"
