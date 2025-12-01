@@ -29,8 +29,8 @@ COPY src ./src/
 
 RUN ./build.sh "$TARGETPLATFORM" "/application"
 
-FROM alpine:3.21.3
-RUN apk add --no-cache socat
+FROM gcr.io/distroless/static-debian13:latest
+#RUN apk add --no-cache socat
 
 COPY nc-web.sh /
 COPY --from=0 /application/bin/* /

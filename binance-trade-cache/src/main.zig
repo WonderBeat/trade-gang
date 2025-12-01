@@ -109,7 +109,7 @@ fn storageRoutine(
         metrics.processed();
         if (updates_count % 67700 == 0) {
             const now = std.time.milliTimestamp();
-            const latency = now - max_seen_ts;
+            const latency = @divFloor(now, 1000) - max_seen_ts;
             metrics.latency(latency);
             metrics.maxTs(max_seen_ts);
             //try metrics.dumpToFile();
